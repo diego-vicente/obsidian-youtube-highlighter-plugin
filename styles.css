@@ -76,6 +76,95 @@
 	font-style: italic;
 }
 
+/* User-highlighted text (word-level <span> wrappers) */
+.yt-highlighter-highlight {
+	background: hsla(50, 100%, 50%, 0.3);
+	cursor: pointer;
+	color: inherit;
+}
+
+.yt-highlighter-highlight:hover {
+	background: hsla(50, 100%, 50%, 0.5);
+}
+
+/* Highlighted text inside the active (synced) segment */
+.yt-highlighter-transcript-segment--active .yt-highlighter-highlight {
+	background: hsla(50, 100%, 50%, 0.4);
+}
+
+/* ─── Toolbar ────────────────────────────────────────────────────── */
+
+.yt-highlighter-toolbar {
+	display: flex;
+	gap: var(--size-4-2);
+	padding: var(--size-4-2) var(--size-4-4);
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+}
+
+.yt-highlighter-annotation-add {
+	cursor: pointer;
+	font-size: var(--font-small);
+}
+
+/* ─── Annotations panel ──────────────────────────────────────────── */
+
+.yt-highlighter-annotations {
+	padding: 0 var(--size-4-4) var(--size-4-2);
+}
+
+.yt-highlighter-annotation {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	padding: var(--size-4-1) 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.yt-highlighter-annotation:last-child {
+	border-bottom: none;
+}
+
+.yt-highlighter-annotation-timestamp {
+	color: var(--text-muted);
+	font-size: var(--font-smallest);
+	font-family: var(--font-monospace);
+	white-space: nowrap;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.yt-highlighter-annotation-timestamp:hover {
+	color: var(--interactive-accent);
+}
+
+.yt-highlighter-annotation-input {
+	flex: 1;
+	background: transparent;
+	border: none;
+	border-bottom: 1px solid var(--background-modifier-border);
+	color: var(--text-normal);
+	font-size: var(--font-small);
+	padding: var(--size-4-1);
+	outline: none;
+}
+
+.yt-highlighter-annotation-input:focus {
+	border-bottom-color: var(--interactive-accent);
+}
+
+.yt-highlighter-annotation-delete {
+	cursor: pointer;
+	color: var(--text-muted);
+	font-size: var(--font-ui-medium);
+	padding: 0 var(--size-4-1);
+	flex-shrink: 0;
+}
+
+.yt-highlighter-annotation-delete:hover {
+	color: var(--text-error);
+}
+
 /* ─── Manual paste fallback ──────────────────────────────────────── */
 
 .yt-highlighter-manual-paste {

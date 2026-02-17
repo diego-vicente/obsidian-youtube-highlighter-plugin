@@ -1,19 +1,53 @@
-/** Data stored inside the ```youtube-highlights code block as JSON. */
+/**
+ * Data stored inside the ```youtube-highlights code block as JSON.
+ * Intentionally minimal — only identity fields that never change during use.
+ * Highlights and annotations are stored separately in the plugin data folder
+ * to avoid code block writes that trigger Obsidian re-renders.
+ */
 export interface VideoData {
 	videoId: string;
 	title: string;
-	highlights: Highlight[];
-	annotations: Annotation[];
-	/** "cached" means transcript is stored in the plugin data folder; "none" means not yet fetched. */
-	transcript: "cached" | "none";
+	/**
+	 * Legacy fields from earlier versions. If present when loading, they are
+	 * migrated to the data store and removed from the code block.
+	 */
+	highlights?: Highlight[];
+	annotations?: Annotation[];
+	transcript?: "cached" | "none";
 }
 
-/** A highlighted excerpt of the transcript. Single color; exports as ==...== in markdown. */
+/**
+ * User data stored in the plugin data folder, keyed by videoId.
+ * Separated from the code block to avoid re-render on every change.
+ */
+export interface VideoUserData {
+	highlights: Highlight[];
+	annotations: Annotation[];
+}
+
+/**
+ * A highlighted excerpt of the transcript. Supports sub-entry (word-level)
+ * selections. Single color; exports as ==...== in markdown.
+ *
+ * The highlight stores the exact selected text and the entry indices it spans,
+ * plus character offsets within the first and last entries for precise restoration.
+ */
 export interface Highlight {
 	id: string;
-	startTime: number;   // seconds
-	endTime: number;     // seconds
-	text: string;        // the highlighted transcript text
+	/** The exact text the user selected (for display and export). */
+	text: string;
+	/** Index of the first transcript entry touched by this highlight. */
+	startEntryIndex: number;
+	/** Character offset within the first entry's text where the highlight starts. */
+	startCharOffset: number;
+	/** Index of the last transcript entry touched by this highlight. */
+	endEntryIndex: number;
+	/** Character offset within the last entry's text where the highlight ends. */
+	endCharOffset: number;
+	/** Start time in seconds (derived from startEntryIndex, cached for export). */
+	startTime: number;
+	/** End time in seconds (derived from endEntryIndex, cached for export). */
+	endTime: number;
 }
 
 /** A free-text note attached to a specific timestamp. Independent from highlights. */
@@ -35,9 +69,14 @@ export function createEmptyVideoData(videoId: string, title = ""): VideoData {
 	return {
 		videoId,
 		title,
+	};
+}
+
+/** Creates an empty VideoUserData. */
+export function createEmptyUserData(): VideoUserData {
+	return {
 		highlights: [],
 		annotations: [],
-		transcript: "none",
 	};
 }
 

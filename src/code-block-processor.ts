@@ -5,6 +5,8 @@ import {CODE_BLOCK_LANGUAGE} from "./types";
 import {createPlayer} from "./player";
 import {fetchTranscript, parseManualTranscript} from "./transcript";
 import {createTranscriptView} from "./transcript-view";
+import {setupHighlighting} from "./highlights";
+import {createAnnotationsView} from "./annotations";
 
 /** CSS class names used by the code block processor. */
 const CSS = {
@@ -24,8 +26,8 @@ const CSS = {
 export function registerCodeBlockProcessor(plugin: YouTubeHighlighterPlugin): void {
 	plugin.registerMarkdownCodeBlockProcessor(
 		CODE_BLOCK_LANGUAGE,
-		(source: string, el: HTMLElement, _ctx: MarkdownPostProcessorContext) => {
-			void renderWidget(source, el, plugin);
+		(source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
+			void renderWidget(source, el, ctx, plugin);
 		},
 	);
 }
@@ -33,10 +35,16 @@ export function registerCodeBlockProcessor(plugin: YouTubeHighlighterPlugin): vo
 /**
  * Top-level render function: parses JSON, creates the player, fetches
  * the transcript, and assembles the full widget.
+ *
+ * Highlights and annotations are stored in the plugin data folder (via
+ * VideoDataStore), NOT in the code block. This means the code block
+ * content never changes during normal use, so Obsidian never triggers
+ * a re-render — the player stays alive and the widget is stable.
  */
 async function renderWidget(
 	source: string,
 	el: HTMLElement,
+	ctx: MarkdownPostProcessorContext,
 	plugin: YouTubeHighlighterPlugin,
 ): Promise<void> {
 	const videoData = parseVideoData(source);
@@ -45,17 +53,33 @@ async function renderWidget(
 		return;
 	}
 
+	const {videoId} = videoData;
+	const store = plugin.dataStore;
+
+	// Load user data (highlights, annotations) from the data store.
+	// Also migrates any legacy annotations that were stored inline in the code block.
+	await store.load(videoId);
+	if (videoData.annotations?.length) {
+		await store.importLegacyAnnotations(videoId, videoData.annotations);
+	}
+
 	const widgetEl = el.createDiv({cls: CSS.widget});
 
 	// 1. Embed the YouTube player.
-	const player = createPlayer(widgetEl, videoData.videoId);
+	const player = createPlayer(widgetEl, videoId);
 
 	// 2. Fetch or load the transcript.
 	const entries = await loadTranscript(widgetEl, videoData, plugin);
 
 	// 3. Render the synced transcript view.
 	if (entries && entries.length > 0) {
-		createTranscriptView(widgetEl, entries, player);
+		const transcriptView = createTranscriptView(widgetEl, entries, player);
+
+		// 4. Set up highlighting (text selection → highlight creation).
+		setupHighlighting(transcriptView.containerEl, transcriptView.entrySpanMap, entries, videoId, store);
+
+		// 5. Render annotations panel and toolbar.
+		createAnnotationsView(widgetEl, videoId, store, player);
 	}
 }
 

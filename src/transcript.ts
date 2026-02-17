@@ -86,6 +86,10 @@ interface CaptionTrack {
 }
 
 interface InnertubePlayerResponse {
+	playabilityStatus?: {
+		status?: string;
+		reason?: string;
+	};
 	captions?: {
 		playerCaptionsTracklistRenderer?: {
 			captionTracks?: CaptionTrack[];
@@ -112,6 +116,15 @@ async function fetchCaptionTracks(videoId: string, lang: string): Promise<Captio
 	});
 
 	const data = response.json as InnertubePlayerResponse;
+
+	// Check if the video is unplayable (private, deleted, age-restricted, etc.)
+	const playabilityStatus = data?.playabilityStatus?.status;
+	const PLAYABLE_STATUS = "OK";
+	if (playabilityStatus && playabilityStatus !== PLAYABLE_STATUS) {
+		const reason = data?.playabilityStatus?.reason ?? `Video is ${playabilityStatus.toLowerCase()}.`;
+		throw new Error(reason);
+	}
+
 	return data?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? null;
 }
 

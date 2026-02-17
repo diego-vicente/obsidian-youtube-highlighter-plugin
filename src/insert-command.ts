@@ -57,9 +57,6 @@ function buildCodeBlock(videoId: string): string {
 	const data = {
 		videoId,
 		title: "",
-		highlights: [],
-		annotations: [],
-		transcript: "none",
 	};
 	const json = JSON.stringify(data, null, 2);
 	return `\`\`\`${CODE_BLOCK_LANGUAGE}\n${json}\n\`\`\`\n`;

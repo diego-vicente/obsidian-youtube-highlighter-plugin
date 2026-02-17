@@ -26,6 +26,8 @@ const CSS = {
 export interface TranscriptView {
 	/** The container element holding the transcript. */
 	containerEl: HTMLElement;
+	/** Map from original entry index → array of rendered spans (for highlights). */
+	entrySpanMap: HTMLElement[][];
 	/** Start polling for sync with the player. */
 	startSync(): void;
 	/** Stop polling. */
@@ -135,7 +137,7 @@ export function createTranscriptView(
 
 	if (entries.length === 0) {
 		containerEl.createDiv({cls: CSS.empty, text: "No transcript available."});
-		return {containerEl, startSync: noop, stopSync: noop, destroy: noop};
+		return {containerEl, entrySpanMap: [], startSync: noop, stopSync: noop, destroy: noop};
 	}
 
 	const displaySegments = splitMultiSpeakerEntries(entries);
@@ -178,6 +180,13 @@ export function createTranscriptView(
 		if (syncInterval !== null) return;
 
 		syncInterval = window.setInterval(() => {
+			// Stop polling if the container has been removed from the DOM
+			// (e.g., during a code block re-render).
+			if (!containerEl.isConnected) {
+				stopSync();
+				return;
+			}
+
 			void player.instance.getPlayerState().then(async (state) => {
 				if (state === PlayerState.PLAYING) {
 					const currentTime = await player.getCurrentTime();
@@ -207,7 +216,7 @@ export function createTranscriptView(
 		}
 	});
 
-	return {containerEl, startSync, stopSync, destroy};
+	return {containerEl, entrySpanMap, startSync, stopSync, destroy};
 }
 
 // ─── Rendering ───────────────────────────────────────────────────────
@@ -235,12 +244,11 @@ function renderParagraphs(
 			if (!segment) continue;
 
 			// Collapse internal newlines (YouTube subtitle line wrapping) into spaces.
-			const displayText = segment.text.replace(/\n/g, " ");
-
-			// Add a space separator between segments within the same paragraph.
-			if (i > 0) {
-				paragraphEl.appendText(" ");
-			}
+			// Prepend a space separator for non-first segments so the space lives
+			// inside the span — this avoids orphan text nodes that create visual
+			// gaps when highlights cross entry boundaries.
+			const isFirstSegment = i === 0;
+			const displayText = (isFirstSegment ? "" : " ") + segment.text.replace(/\n/g, " ");
 
 			const segmentSpan = paragraphEl.createSpan({
 				cls: CSS.segment,
