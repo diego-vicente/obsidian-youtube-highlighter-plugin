@@ -9,8 +9,12 @@ import {setupHighlighting} from "./highlights";
 import {createAnnotationsView} from "./annotations";
 
 /** CSS class names used by the code block processor. */
+/** Build timestamp injected by esbuild at compile time. */
+declare const BUILD_TIMESTAMP: string;
+
 const CSS = {
 	widget: "yt-highlighter-widget",
+	buildInfo: "yt-highlighter-build-info",
 	error: "yt-highlighter-error",
 	fetchingNotice: "yt-highlighter-fetching",
 	manualPaste: "yt-highlighter-manual-paste",
@@ -81,6 +85,9 @@ async function renderWidget(
 		// 5. Render annotations panel and toolbar.
 		createAnnotationsView(widgetEl, videoId, store, player);
 	}
+
+	// Build info for debugging sync issues.
+	widgetEl.createDiv({cls: CSS.buildInfo, text: `Build: ${BUILD_TIMESTAMP}`});
 }
 
 /**

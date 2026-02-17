@@ -8,6 +8,8 @@ declare module "youtube-player" {
 		height?: number;
 		videoId?: string;
 		playerVars?: Record<string, unknown>;
+		/** Override the embed host (e.g. "https://www.youtube-nocookie.com"). */
+		host?: string;
 	}
 
 	interface PlayerEvent {

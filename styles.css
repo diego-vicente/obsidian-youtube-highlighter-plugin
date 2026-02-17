@@ -107,6 +107,15 @@
 	font-size: var(--font-small);
 }
 
+/* ─── Build info (debug) ─────────────────────────────────────────── */
+
+.yt-highlighter-build-info {
+	padding: var(--size-4-1) var(--size-4-4);
+	font-size: var(--font-smallest);
+	color: var(--text-faint);
+	text-align: right;
+}
+
 /* ─── Annotations panel ──────────────────────────────────────────── */
 
 .yt-highlighter-annotations {

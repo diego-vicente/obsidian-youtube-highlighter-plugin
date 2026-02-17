@@ -187,7 +187,7 @@ export function createTranscriptView(
 				return;
 			}
 
-			void player.instance.getPlayerState().then(async (state) => {
+			void player.getPlayerState().then(async (state) => {
 				if (state === PlayerState.PLAYING) {
 					const currentTime = await player.getCurrentTime();
 					updateActiveLineFromTime(currentTime);

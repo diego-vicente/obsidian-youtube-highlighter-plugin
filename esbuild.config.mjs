@@ -15,6 +15,9 @@ const context = await esbuild.context({
 	banner: {
 		js: banner,
 	},
+	define: {
+		"BUILD_TIMESTAMP": JSON.stringify(new Date().toISOString()),
+	},
 	entryPoints: ["src/main.ts"],
 	bundle: true,
 	external: [
