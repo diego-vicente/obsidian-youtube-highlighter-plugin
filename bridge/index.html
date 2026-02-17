@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YouTube Player Bridge</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  #player { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+/**
+ * YouTube Player Bridge
+ *
+ * This page is hosted on GitHub Pages and loaded inside an <iframe> by the
+ * Obsidian YouTube Highlighter plugin on iOS. It wraps the YouTube IFrame
+ * API and exposes a postMessage interface so the plugin can control playback
+ * and receive events — even though the iframe is cross-origin.
+ *
+ * Protocol (parent -> bridge):
+ *   { action: "seekTo", seconds: number }
+ *   { action: "getCurrentTime", requestId: string }
+ *   { action: "getPlayerState", requestId: string }
+ *   { action: "play" }
+ *   { action: "pause" }
+ *
+ * Protocol (bridge -> parent):
+ *   { type: "ready" }
+ *   { type: "stateChange", state: number }
+ *   { type: "currentTime", requestId: string, time: number }
+ *   { type: "playerState", requestId: string, state: number }
+ *   { type: "error", code: number }
+ */
+
+var player = null;
+
+// ── Parse video ID from URL ──────────────────────────────────────────
+
+var params = new URLSearchParams(window.location.search);
+var videoId = params.get("v");
+
+if (!videoId) {
+  document.body.textContent = "Missing video ID (?v=...)";
+}
+
+// ── Load YouTube IFrame API ──────────────────────────────────────────
+
+var tag = document.createElement("script");
+tag.src = "https://www.youtube.com/iframe_api";
+document.head.appendChild(tag);
+
+// YouTube IFrame API calls this global function when ready.
+window.onYouTubeIframeAPIReady = function() {
+  player = new YT.Player("player", {
+    videoId: videoId,
+    width: "100%",
+    height: "100%",
+    playerVars: {
+      autoplay: 0,
+      modestbranding: 1,
+      rel: 0,
+      enablejsapi: 1,
+      playsinline: 1,
+      origin: window.location.origin
+    },
+    events: {
+      onReady: onPlayerReady,
+      onStateChange: onPlayerStateChange,
+      onError: onPlayerError
+    }
+  });
+};
+
+function onPlayerReady() {
+  sendToParent({ type: "ready" });
+}
+
+function onPlayerStateChange(event) {
+  sendToParent({ type: "stateChange", state: event.data });
+}
+
+function onPlayerError(event) {
+  sendToParent({ type: "error", code: event.data });
+}
+
+// ── Message handling (parent -> bridge) ──────────────────────────────
+
+window.addEventListener("message", function(event) {
+  if (!player) return;
+
+  var data = event.data;
+  if (!data || typeof data !== "object" || !data.action) return;
+
+  switch (data.action) {
+    case "seekTo":
+      player.seekTo(data.seconds, true);
+      break;
+
+    case "getCurrentTime":
+      sendToParent({
+        type: "currentTime",
+        requestId: data.requestId,
+        time: player.getCurrentTime()
+      });
+      break;
+
+    case "getPlayerState":
+      sendToParent({
+        type: "playerState",
+        requestId: data.requestId,
+        state: player.getPlayerState()
+      });
+      break;
+
+    case "play":
+      player.playVideo();
+      break;
+
+    case "pause":
+      player.pauseVideo();
+      break;
+  }
+});
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+function sendToParent(message) {
+  // Use "*" as targetOrigin because the parent is on capacitor://localhost
+  // (iOS) or app://obsidian.md (desktop) — neither is a standard HTTPS origin.
+  window.parent.postMessage(message, "*");
+}
+</script>
+</body>
+</html>
