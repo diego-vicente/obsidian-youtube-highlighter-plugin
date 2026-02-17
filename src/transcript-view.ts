@@ -1,18 +1,25 @@
 import type {TranscriptEntry} from "./types";
 import type {PlayerWrapper} from "./player";
 import {PlayerState} from "./player";
-import {secondsToTimestamp} from "./utils/time";
 
 const SYNC_POLL_INTERVAL_MS = 250;
 const SCROLL_CENTER_DIVISOR = 2;
 
+/** Speaker change marker that YouTube uses at the start of subtitle text. */
+const SPEAKER_CHANGE_PREFIX = "- ";
+
+/**
+ * Fallback: maximum segments per paragraph when no speaker markers are present.
+ * Prevents a single wall-of-text paragraph for videos without speaker indicators.
+ */
+const MAX_SEGMENTS_PER_PARAGRAPH = 6;
+
 /** CSS class names used by the transcript view. */
 const CSS = {
 	container: "yt-highlighter-transcript",
-	line: "yt-highlighter-transcript-line",
-	lineActive: "yt-highlighter-transcript-line--active",
-	timestamp: "yt-highlighter-transcript-timestamp",
-	text: "yt-highlighter-transcript-text",
+	paragraph: "yt-highlighter-transcript-paragraph",
+	segment: "yt-highlighter-transcript-segment",
+	segmentActive: "yt-highlighter-transcript-segment--active",
 	empty: "yt-highlighter-transcript-empty",
 } as const;
 
@@ -27,11 +34,97 @@ export interface TranscriptView {
 	destroy(): void;
 }
 
+// ─── Paragraph grouping (display only) ───────────────────────────────
+
+/** Regex to split on mid-text speaker changes like "- Right. - C is a constant." */
+const MID_TEXT_SPEAKER_SPLIT = /\s+(?=- )/;
+
+/**
+ * A display segment maps to one or more visual spans. When a single transcript
+ * entry contains multiple speakers (e.g. "- Right. - C is a constant."),
+ * it gets split into separate display segments that share the same offset.
+ * The `sourceIndex` tracks which original entry this came from (for sync).
+ */
+interface DisplaySegment {
+	text: string;
+	offset: number;
+	sourceIndex: number;
+}
+
+/**
+ * Splits transcript entries that contain multiple speakers into
+ * separate display segments. Purely for rendering — the underlying
+ * transcript data is not modified.
+ */
+function splitMultiSpeakerEntries(entries: TranscriptEntry[]): DisplaySegment[] {
+	const segments: DisplaySegment[] = [];
+
+	for (let i = 0; i < entries.length; i++) {
+		const entry = entries[i];
+		if (!entry) continue;
+
+		const parts = entry.text.split(MID_TEXT_SPEAKER_SPLIT);
+		for (const part of parts) {
+			if (part.trim()) {
+				segments.push({text: part, offset: entry.offset, sourceIndex: i});
+			}
+		}
+	}
+
+	return segments;
+}
+
+/** A paragraph is a group of consecutive display segments rendered as flowing text. */
+interface DisplayParagraph {
+	segments: DisplaySegment[];
+}
+
+/**
+ * Groups display segments into paragraphs.
+ *
+ * Primary signal: speaker changes (text starts with "- ").
+ * Fallback: if no speaker markers exist in the transcript, groups are
+ * capped at MAX_SEGMENTS_PER_PARAGRAPH to avoid walls of text.
+ */
+function groupIntoParagraphs(segments: DisplaySegment[]): DisplayParagraph[] {
+	if (segments.length === 0) return [];
+
+	const hasSpeakerMarkers = segments.some(s => s.text.startsWith(SPEAKER_CHANGE_PREFIX));
+
+	const paragraphs: DisplayParagraph[] = [];
+	let current: DisplaySegment[] = [];
+
+	for (const segment of segments) {
+		const isFirst = current.length === 0;
+
+		if (!isFirst) {
+			const shouldBreak = hasSpeakerMarkers
+				? segment.text.startsWith(SPEAKER_CHANGE_PREFIX)
+				: current.length >= MAX_SEGMENTS_PER_PARAGRAPH;
+
+			if (shouldBreak) {
+				paragraphs.push({segments: current});
+				current = [];
+			}
+		}
+
+		current.push(segment);
+	}
+
+	if (current.length > 0) {
+		paragraphs.push({segments: current});
+	}
+
+	return paragraphs;
+}
+
+// ─── View ────────────────────────────────────────────────────────────
+
 /**
  * Renders a scrolling transcript panel synced to a YouTube player.
- * - Each line shows a timestamp and transcript text.
- * - The currently playing line is highlighted (karaoke-style).
- * - Clicking a line seeks the video to that timestamp.
+ * Entries are grouped into paragraphs of flowing text.
+ * The currently active segment is highlighted inline (karaoke-style).
+ * No timestamps are shown — the text reads as prose.
  */
 export function createTranscriptView(
 	parentEl: HTMLElement,
@@ -45,7 +138,9 @@ export function createTranscriptView(
 		return {containerEl, startSync: noop, stopSync: noop, destroy: noop};
 	}
 
-	const lineElements = renderLines(containerEl, entries, player);
+	const displaySegments = splitMultiSpeakerEntries(entries);
+	const paragraphs = groupIntoParagraphs(displaySegments);
+	const entrySpanMap = renderParagraphs(containerEl, paragraphs, entries, player);
 
 	let syncInterval: number | null = null;
 	let activeIndex = -1;
@@ -54,19 +149,27 @@ export function createTranscriptView(
 		const newIndex = findActiveEntryIndex(entries, currentTime);
 		if (newIndex === activeIndex) return;
 
-		// Remove highlight from previous active line.
-		if (activeIndex >= 0 && activeIndex < lineElements.length) {
-			lineElements[activeIndex]?.removeClass(CSS.lineActive);
+		// Remove highlight from all spans of the previous active entry.
+		if (activeIndex >= 0 && activeIndex < entrySpanMap.length) {
+			for (const span of entrySpanMap[activeIndex] ?? []) {
+				span.removeClass(CSS.segmentActive);
+			}
 		}
 
 		activeIndex = newIndex;
 
-		// Add highlight to new active line and scroll it into view within the container.
-		if (activeIndex >= 0 && activeIndex < lineElements.length) {
-			const activeLine = lineElements[activeIndex];
-			activeLine?.addClass(CSS.lineActive);
-			if (activeLine) {
-				scrollToLineInContainer(containerEl, activeLine);
+		// Highlight all spans of the new active entry and scroll into view.
+		if (activeIndex >= 0 && activeIndex < entrySpanMap.length) {
+			const spans = entrySpanMap[activeIndex] ?? [];
+			for (const span of spans) {
+				span.addClass(CSS.segmentActive);
+			}
+			const firstSpan = spans[0];
+			if (firstSpan) {
+				const paragraph = firstSpan.parentElement;
+				if (paragraph) {
+					scrollToElementInContainer(containerEl, paragraph);
+				}
 			}
 		}
 	}
@@ -95,7 +198,7 @@ export function createTranscriptView(
 		stopSync();
 	}
 
-	// Auto-start sync when the player begins playing.
+	// Auto-start/stop sync with player state.
 	player.onStateChange((state) => {
 		if (state === PlayerState.PLAYING) {
 			startSync();
@@ -107,42 +210,62 @@ export function createTranscriptView(
 	return {containerEl, startSync, stopSync, destroy};
 }
 
+// ─── Rendering ───────────────────────────────────────────────────────
+
 /**
- * Renders all transcript lines into the container.
- * Returns an array of line elements (indexed parallel to entries).
+ * Renders paragraphs as flowing prose. Each display segment is a <span>
+ * so it can be individually highlighted. Returns a map from original
+ * entry index → array of span elements. When a single entry was split
+ * into multiple display segments (multi-speaker), all fragments are
+ * included so they highlight together during sync.
  */
-function renderLines(
+function renderParagraphs(
 	containerEl: HTMLElement,
-	entries: TranscriptEntry[],
+	paragraphs: DisplayParagraph[],
+	allEntries: TranscriptEntry[],
 	player: PlayerWrapper,
-): HTMLElement[] {
-	return entries.map((entry) => {
-		const lineEl = containerEl.createDiv({cls: CSS.line});
+): HTMLElement[][] {
+	const entrySpanMap: HTMLElement[][] = allEntries.map(() => []);
 
-		lineEl.createSpan({
-			cls: CSS.timestamp,
-			text: secondsToTimestamp(entry.offset),
-		});
+	for (const paragraph of paragraphs) {
+		const paragraphEl = containerEl.createEl("p", {cls: CSS.paragraph});
 
-		lineEl.createSpan({
-			cls: CSS.text,
-			text: entry.text,
-		});
+		for (let i = 0; i < paragraph.segments.length; i++) {
+			const segment = paragraph.segments[i];
+			if (!segment) continue;
 
-		// Click to seek.
-		lineEl.addEventListener("click", () => {
-			void player.seekTo(entry.offset);
-		});
+			// Collapse internal newlines (YouTube subtitle line wrapping) into spaces.
+			const displayText = segment.text.replace(/\n/g, " ");
 
-		return lineEl;
-	});
+			// Add a space separator between segments within the same paragraph.
+			if (i > 0) {
+				paragraphEl.appendText(" ");
+			}
+
+			const segmentSpan = paragraphEl.createSpan({
+				cls: CSS.segment,
+				text: displayText,
+			});
+
+			// Click to seek to this segment's timestamp.
+			const offset = segment.offset;
+			segmentSpan.addEventListener("click", () => {
+				void player.seekTo(offset);
+			});
+
+			// Map back to original entry index — collect all fragments.
+			entrySpanMap[segment.sourceIndex]?.push(segmentSpan);
+		}
+	}
+
+	return entrySpanMap;
 }
+
+// ─── Helpers ─────────────────────────────────────────────────────────
 
 /**
  * Binary search for the transcript entry active at the given time.
- * Returns the index of the entry whose offset is ≤ currentTime
- * and whose end (offset + duration) is > currentTime.
- * Falls back to the last entry whose offset ≤ currentTime.
+ * Returns the index of the last entry whose offset is <= currentTime.
  */
 function findActiveEntryIndex(entries: TranscriptEntry[], currentTime: number): number {
 	if (entries.length === 0) return -1;
@@ -168,12 +291,12 @@ function findActiveEntryIndex(entries: TranscriptEntry[], currentTime: number): 
 }
 
 /**
- * Scrolls the container so the target line is vertically centered,
+ * Scrolls the container so the target element is vertically centered,
  * without affecting the scroll position of the surrounding note.
  */
-function scrollToLineInContainer(container: HTMLElement, line: HTMLElement): void {
-	const lineTop = line.offsetTop - container.offsetTop;
-	const centeredPosition = lineTop - container.clientHeight / SCROLL_CENTER_DIVISOR + line.clientHeight / SCROLL_CENTER_DIVISOR;
+function scrollToElementInContainer(container: HTMLElement, target: HTMLElement): void {
+	const targetTop = target.offsetTop - container.offsetTop;
+	const centeredPosition = targetTop - container.clientHeight / SCROLL_CENTER_DIVISOR + target.clientHeight / SCROLL_CENTER_DIVISOR;
 	container.scrollTo({top: centeredPosition, behavior: "smooth"});
 }
 

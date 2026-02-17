@@ -35,44 +35,38 @@
 .yt-highlighter-transcript {
 	max-height: 300px;
 	overflow-y: auto;
-	padding: var(--size-4-2);
+	padding: var(--size-4-4);
 	background: var(--background-primary);
 	border-top: 1px solid var(--background-modifier-border);
 }
 
-.yt-highlighter-transcript-line {
-	display: flex;
-	gap: var(--size-4-2);
-	padding: var(--size-4-1) var(--size-4-2);
-	border-radius: var(--radius-s);
-	cursor: pointer;
-	transition: background-color 100ms ease;
+/* Paragraphs: flowing prose, no timestamps visible */
+.yt-highlighter-transcript-paragraph {
+	margin: 0 0 var(--size-4-3) 0;
+	color: var(--text-normal);
+	font-size: var(--font-small);
+	line-height: 1.7;
 }
 
-.yt-highlighter-transcript-line:hover {
+.yt-highlighter-transcript-paragraph:last-child {
+	margin-bottom: 0;
+}
+
+/* Individual segments within a paragraph (inline spans) */
+.yt-highlighter-transcript-segment {
+	cursor: pointer;
+	border-radius: var(--radius-s);
+	transition: background-color 150ms ease, color 150ms ease;
+}
+
+.yt-highlighter-transcript-segment:hover {
 	background: var(--background-modifier-hover);
 }
 
-/* Active (karaoke) line */
-.yt-highlighter-transcript-line--active {
-	background: var(--background-modifier-active-hover);
-	font-weight: var(--font-semibold);
-}
-
-.yt-highlighter-transcript-timestamp {
-	color: var(--text-muted);
-	font-size: var(--font-smallest);
-	font-family: var(--font-monospace);
-	white-space: nowrap;
-	min-width: 3.5em;
-	flex-shrink: 0;
-	padding-top: 1px;
-}
-
-.yt-highlighter-transcript-text {
-	color: var(--text-normal);
-	font-size: var(--font-small);
-	line-height: 1.5;
+/* Active segment: blue highlight following playback */
+.yt-highlighter-transcript-segment--active {
+	background: hsla(var(--interactive-accent-hsl), 0.2);
+	color: var(--interactive-accent);
 }
 
 .yt-highlighter-transcript-empty {
