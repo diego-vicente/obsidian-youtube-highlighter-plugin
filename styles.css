@@ -1,8 +1,155 @@
-/*
+/* ─── YouTube Highlighter Plugin ──────────────────────────────────── */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+/* Widget container */
+.yt-highlighter-widget {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	overflow: hidden;
+}
 
-If your plugin does not need CSS, delete this file.
+/* ─── Player ─────────────────────────────────────────────────────── */
 
-*/
+.yt-highlighter-player {
+	position: relative;
+	width: 100%;
+	padding-bottom: 56.25%; /* 16:9 aspect ratio */
+	height: 0;
+	overflow: hidden;
+	background: var(--background-secondary);
+}
+
+.yt-highlighter-player iframe {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	border: none;
+}
+
+/* ─── Transcript panel ───────────────────────────────────────────── */
+
+.yt-highlighter-transcript {
+	max-height: 300px;
+	overflow-y: auto;
+	padding: var(--size-4-2);
+	background: var(--background-primary);
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.yt-highlighter-transcript-line {
+	display: flex;
+	gap: var(--size-4-2);
+	padding: var(--size-4-1) var(--size-4-2);
+	border-radius: var(--radius-s);
+	cursor: pointer;
+	transition: background-color 100ms ease;
+}
+
+.yt-highlighter-transcript-line:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* Active (karaoke) line */
+.yt-highlighter-transcript-line--active {
+	background: var(--background-modifier-active-hover);
+	font-weight: var(--font-semibold);
+}
+
+.yt-highlighter-transcript-timestamp {
+	color: var(--text-muted);
+	font-size: var(--font-smallest);
+	font-family: var(--font-monospace);
+	white-space: nowrap;
+	min-width: 3.5em;
+	flex-shrink: 0;
+	padding-top: 1px;
+}
+
+.yt-highlighter-transcript-text {
+	color: var(--text-normal);
+	font-size: var(--font-small);
+	line-height: 1.5;
+}
+
+.yt-highlighter-transcript-empty {
+	padding: var(--size-4-4);
+	text-align: center;
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+/* ─── Manual paste fallback ──────────────────────────────────────── */
+
+.yt-highlighter-manual-paste {
+	padding: var(--size-4-4);
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.yt-highlighter-manual-paste p {
+	margin: 0 0 var(--size-4-2) 0;
+	font-size: var(--font-small);
+	color: var(--text-muted);
+}
+
+.yt-highlighter-manual-textarea {
+	width: 100%;
+	min-height: 120px;
+	padding: var(--size-4-2);
+	margin-bottom: var(--size-4-2);
+	font-family: var(--font-monospace);
+	font-size: var(--font-smallest);
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-normal);
+	resize: vertical;
+}
+
+.yt-highlighter-manual-button {
+	cursor: pointer;
+}
+
+/* ─── Fetching notice ────────────────────────────────────────────── */
+
+.yt-highlighter-fetching {
+	padding: var(--size-4-4);
+	text-align: center;
+	color: var(--text-muted);
+	font-style: italic;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+/* ─── Insert modal error ─────────────────────────────────────────── */
+
+.yt-highlighter-insert-error {
+	color: var(--text-error);
+	font-size: var(--font-small);
+	margin-top: 0;
+}
+
+/* ─── Error state ────────────────────────────────────────────────── */
+
+.yt-highlighter-error {
+	padding: var(--size-4-4);
+	background: var(--background-modifier-error);
+	border-radius: var(--radius-m);
+}
+
+.yt-highlighter-error p {
+	margin: 0 0 var(--size-4-2) 0;
+	color: var(--text-error);
+}
+
+.yt-highlighter-error pre {
+	padding: var(--size-4-2);
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	font-size: var(--font-smallest);
+	overflow-x: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+}

@@ -1,35 +1,36 @@
 import {App, PluginSettingTab, Setting} from "obsidian";
-import MyPlugin from "./main";
+import type YouTubeHighlighterPlugin from "./main";
 
-export interface MyPluginSettings {
-	mySetting: string;
+export interface YouTubeHighlighterSettings {
+	/** Preferred language code for auto-fetched transcripts (e.g. "en", "es"). */
+	transcriptLanguage: string;
 }
 
-export const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
+export const DEFAULT_SETTINGS: YouTubeHighlighterSettings = {
+	transcriptLanguage: "en",
+};
 
-export class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+export class YouTubeHighlighterSettingTab extends PluginSettingTab {
+	plugin: YouTubeHighlighterPlugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: YouTubeHighlighterPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
 		const {containerEl} = this;
-
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Settings #1')
-			.setDesc('It\'s a secret')
+			.setName("Transcript language")
+			.setDesc("Preferred language code for auto-fetched YouTube transcripts.")
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				// eslint-disable-next-line obsidianmd/ui/sentence-case -- language code placeholder
+				.setPlaceholder("en")
+				.setValue(this.plugin.settings.transcriptLanguage)
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.transcriptLanguage = value;
 					await this.plugin.saveSettings();
 				}));
 	}

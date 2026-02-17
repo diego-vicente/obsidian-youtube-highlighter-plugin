@@ -242,6 +242,21 @@ this.registerInterval(window.setInterval(() => { /* ... */ }, 1000));
 - Settings not persisting: ensure `loadData`/`saveData` are awaited and you re-render the UI after changes.
 - Mobile-only issues: confirm you're not using desktop-only APIs; check `isDesktopOnly` and adjust.
 
+## Project scope
+
+This plugin is a **YouTube Highlighter for Obsidian**. It renders an interactive widget from a custom `youtube-highlights` code block containing:
+
+- An embedded YouTube player (via `youtube-player` npm package)
+- A synced, scrolling transcript below it (karaoke-style, auto-fetched via `youtube-transcript` with manual paste fallback)
+- **Highlighting**: user selects transcript text to mark it; single color, exports as `==...==`
+- **Annotations**: user adds free-text notes at any timestamp; independent from highlights
+
+Data is stored as JSON in the code block (internal representation — not user-edited). The transcript itself is cached in the plugin data folder, not in the code block. A `convert-to-markdown` command replaces the code block with portable Obsidian markdown (`==highlights==` + `>` blockquote annotations with YouTube timestamp links).
+
+The key architectural challenge is the **re-render problem**: modifying the code block JSON triggers Obsidian to destroy and recreate the rendered element (killing the player). This is mitigated with debounced writes and iframe DOM recycling.
+
+See [PLAN.md](./PLAN.md) for the full implementation plan, phased delivery, architecture, data types, and risk assessment.
+
 ## References
 
 - Obsidian sample plugin: https://github.com/obsidianmd/obsidian-sample-plugin
