@@ -1,6 +1,8 @@
+import {Platform} from "obsidian";
 import type {Annotation} from "./types";
 import type {VideoDataStore} from "./video-data-store";
 import type {PlayerWrapper} from "./player";
+import type {HighlightHandle} from "./highlights";
 import {secondsToTimestamp} from "./utils/time";
 
 /** CSS class names used by the annotations UI. */
@@ -11,6 +13,8 @@ const CSS = {
 	text: "yt-highlighter-annotation-text",
 	deleteButton: "yt-highlighter-annotation-delete",
 	addButton: "yt-highlighter-annotation-add",
+	highlightButton: "yt-highlighter-highlight-button",
+	highlightButtonActive: "yt-highlighter-highlight-button--active",
 	input: "yt-highlighter-annotation-input",
 	toolbar: "yt-highlighter-toolbar",
 } as const;
@@ -22,6 +26,8 @@ const ANNOTATION_ID_PREFIX = "a";
  * Renders the annotations panel and toolbar below the transcript.
  * - Shows existing annotations sorted by timestamp.
  * - "Add annotation" button creates a note at the current playback time.
+ * - On mobile, a "Highlight" button applies a highlight to the current
+ *   text selection in the transcript.
  * - Each annotation can be edited inline or deleted.
  */
 export function createAnnotationsView(
@@ -29,11 +35,38 @@ export function createAnnotationsView(
 	videoId: string,
 	store: VideoDataStore,
 	player: PlayerWrapper,
+	highlightHandle?: HighlightHandle,
 ): void {
 	const toolbarEl = parentEl.createDiv({cls: CSS.toolbar});
 	const annotationsEl = parentEl.createDiv({cls: CSS.container});
 
-	// Add annotation button.
+	// ── Highlight button (mobile only) ───────────────────────────────
+
+	if (Platform.isMobile && highlightHandle) {
+		const highlightButton = toolbarEl.createEl("button", {
+			cls: CSS.highlightButton,
+			text: "Highlight",
+		});
+
+		// Start disabled; enabled when a text selection is detected.
+		highlightButton.disabled = true;
+
+		highlightHandle.onSelectionAvailabilityChange((available) => {
+			highlightButton.disabled = !available;
+			if (available) {
+				highlightButton.addClass(CSS.highlightButtonActive);
+			} else {
+				highlightButton.removeClass(CSS.highlightButtonActive);
+			}
+		});
+
+		highlightButton.addEventListener("click", () => {
+			highlightHandle.highlightStashedSelection();
+		});
+	}
+
+	// ── Add annotation button ────────────────────────────────────────
+
 	const addButton = toolbarEl.createEl("button", {
 		cls: CSS.addButton,
 		text: "Add annotation",

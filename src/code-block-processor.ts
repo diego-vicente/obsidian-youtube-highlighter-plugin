@@ -80,10 +80,12 @@ async function renderWidget(
 		const transcriptView = createTranscriptView(widgetEl, entries, player);
 
 		// 4. Set up highlighting (text selection → highlight creation).
-		setupHighlighting(transcriptView.containerEl, transcriptView.entrySpanMap, entries, videoId, store);
+		const highlightHandle = setupHighlighting(
+			transcriptView.containerEl, transcriptView.entrySpanMap, entries, videoId, store,
+		);
 
-		// 5. Render annotations panel and toolbar.
-		createAnnotationsView(widgetEl, videoId, store, player);
+		// 5. Render annotations panel and toolbar (with highlight button on mobile).
+		createAnnotationsView(widgetEl, videoId, store, player, highlightHandle);
 	}
 
 	// Build info for debugging sync issues.

@@ -1,3 +1,4 @@
+import {Platform} from "obsidian";
 import type {Highlight, TranscriptEntry} from "./types";
 import type {VideoDataStore} from "./video-data-store";
 
@@ -14,11 +15,26 @@ const HIGHLIGHT_TAG = "span";
 /** Data attribute storing the highlight ID on highlight elements. */
 const DATA_HIGHLIGHT_ID = "highlightId";
 
+/** Handle returned by setupHighlighting for external interaction. */
+export interface HighlightHandle {
+	/**
+	 * Apply a highlight to the currently stashed selection range.
+	 * Returns true if a highlight was created, false if no valid selection.
+	 * Used by the mobile highlight button.
+	 */
+	highlightStashedSelection(): boolean;
+	/** Whether there is a valid stashed selection ready to highlight. */
+	hasStashedSelection(): boolean;
+	/** Register a callback for when stashed selection availability changes. */
+	onSelectionAvailabilityChange(handler: (available: boolean) => void): void;
+}
+
 /**
  * Sets up highlight functionality on the transcript view.
  *
- * - Selecting text wraps the exact selection in <mark> elements (word-level precision).
- * - Clicking an existing <mark> removes that highlight.
+ * - Desktop: selecting text wraps it immediately on mouseup (word-level precision).
+ * - Mobile: selection is stashed on selectionchange; a toolbar button triggers highlighting.
+ * - Clicking/tapping an existing highlight removes it.
  * - Highlights are persisted to the VideoDataStore with entry indices and
  *   character offsets so they can be restored on reload.
  *
@@ -34,67 +50,165 @@ export function setupHighlighting(
 	entries: TranscriptEntry[],
 	videoId: string,
 	store: VideoDataStore,
-): void {
+): HighlightHandle {
 	// Apply existing highlights from the data store on load.
 	restoreHighlights(entrySpanMap, entries, videoId, store);
 
-	containerEl.addEventListener("mouseup", (event) => {
-		const selection = window.getSelection();
+	/**
+	 * Stashed selection range for mobile. Updated on every selectionchange
+	 * while the selection is inside the transcript container. Consumed by
+	 * the highlight button.
+	 */
+	let stashedRange: Range | null = null;
+	const selectionChangeHandlers: Array<(available: boolean) => void> = [];
 
-		// Collapsed selection = click. Check if it's on a highlight to remove it.
-		if (!selection || selection.isCollapsed) {
-			const highlightEl = findParentHighlight(event.target as Node);
-			if (highlightEl) {
-				const highlightId = highlightEl.dataset[DATA_HIGHLIGHT_ID];
-				if (highlightId) {
-					removeHighlight(highlightId, containerEl, videoId, store);
-				}
+	function setStashedRange(range: Range | null): void {
+		const hadSelection = stashedRange !== null;
+		stashedRange = range;
+		const hasSelection = stashedRange !== null;
+		if (hadSelection !== hasSelection) {
+			for (const handler of selectionChangeHandlers) {
+				handler(hasSelection);
 			}
-			return;
 		}
+	}
 
-		const range = selection.getRangeAt(0);
-		if (!containerEl.contains(range.commonAncestorContainer)) return;
+	// ── Desktop: immediate highlight on mouseup ──────────────────────
 
-		// Map the DOM range to entry indices and character offsets.
-		const mapping = mapRangeToEntryOffsets(range, entrySpanMap);
-		if (!mapping) {
+	if (!Platform.isMobile) {
+		containerEl.addEventListener("mouseup", (event) => {
+			const selection = window.getSelection();
+
+			// Collapsed selection = click. Check if it's on a highlight to remove it.
+			if (!selection || selection.isCollapsed) {
+				handleHighlightClick(event.target as Node, containerEl, videoId, store);
+				return;
+			}
+
+			const range = selection.getRangeAt(0);
+			if (!containerEl.contains(range.commonAncestorContainer)) return;
+
+			applyHighlightFromRange(range, entrySpanMap, entries, videoId, store);
 			selection.removeAllRanges();
-			return;
-		}
+		});
+	}
 
-		const selectedText = range.toString();
-		if (!selectedText.trim()) {
-			selection.removeAllRanges();
-			return;
-		}
+	// ── Mobile: stash selection + tap-to-remove ──────────────────────
 
-		const startEntry = entries[mapping.startEntryIndex];
-		const endEntry = entries[mapping.endEntryIndex];
-		if (!startEntry || !endEntry) {
-			selection.removeAllRanges();
-			return;
-		}
+	if (Platform.isMobile) {
+		// Track the current selection so the highlight button can use it.
+		// selectionchange fires on the document, not on individual elements.
+		const onSelectionChange = (): void => {
+			const selection = window.getSelection();
+			if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+				setStashedRange(null);
+				return;
+			}
 
-		const highlight: Highlight = {
-			id: `${HIGHLIGHT_ID_PREFIX}${Date.now()}`,
-			text: selectedText,
-			startEntryIndex: mapping.startEntryIndex,
-			startCharOffset: mapping.startCharOffset,
-			endEntryIndex: mapping.endEntryIndex,
-			endCharOffset: mapping.endCharOffset,
-			startTime: startEntry.offset,
-			endTime: endEntry.offset + endEntry.duration,
+			const range = selection.getRangeAt(0);
+			if (containerEl.contains(range.commonAncestorContainer)) {
+				// Clone the range so it survives the selection being collapsed.
+				setStashedRange(range.cloneRange());
+			} else {
+				setStashedRange(null);
+			}
 		};
 
-		// Wrap the selection in highlight spans.
-		wrapRangeInHighlightSpans(range, highlight.id);
+		document.addEventListener("selectionchange", onSelectionChange);
 
-		store.get(videoId).highlights.push(highlight);
-		store.requestSave(videoId);
+		// Tap-to-remove on mobile: use click (which fires after touch).
+		containerEl.addEventListener("click", (event) => {
+			const selection = window.getSelection();
+			// Only handle taps, not selections.
+			if (selection && !selection.isCollapsed) return;
 
-		selection.removeAllRanges();
-	});
+			handleHighlightClick(event.target as Node, containerEl, videoId, store);
+		});
+	}
+
+	return {
+		highlightStashedSelection(): boolean {
+			if (!stashedRange) return false;
+
+			const created = applyHighlightFromRange(
+				stashedRange, entrySpanMap, entries, videoId, store,
+			);
+
+			// Clear the stash and any remaining browser selection.
+			setStashedRange(null);
+			window.getSelection()?.removeAllRanges();
+			return created;
+		},
+
+		hasStashedSelection(): boolean {
+			return stashedRange !== null;
+		},
+
+		onSelectionAvailabilityChange(handler: (available: boolean) => void): void {
+			selectionChangeHandlers.push(handler);
+		},
+	};
+}
+
+// ─── Shared highlight creation from a Range ──────────────────────────
+
+/**
+ * Creates a highlight from a DOM Range: maps it to entry offsets, wraps
+ * the selected text in highlight spans, and persists to the data store.
+ * Returns true if a highlight was successfully created.
+ */
+function applyHighlightFromRange(
+	range: Range,
+	entrySpanMap: HTMLElement[][],
+	entries: TranscriptEntry[],
+	videoId: string,
+	store: VideoDataStore,
+): boolean {
+	const mapping = mapRangeToEntryOffsets(range, entrySpanMap);
+	if (!mapping) return false;
+
+	const selectedText = range.toString();
+	if (!selectedText.trim()) return false;
+
+	const startEntry = entries[mapping.startEntryIndex];
+	const endEntry = entries[mapping.endEntryIndex];
+	if (!startEntry || !endEntry) return false;
+
+	const highlight: Highlight = {
+		id: `${HIGHLIGHT_ID_PREFIX}${Date.now()}`,
+		text: selectedText,
+		startEntryIndex: mapping.startEntryIndex,
+		startCharOffset: mapping.startCharOffset,
+		endEntryIndex: mapping.endEntryIndex,
+		endCharOffset: mapping.endCharOffset,
+		startTime: startEntry.offset,
+		endTime: endEntry.offset + endEntry.duration,
+	};
+
+	wrapRangeInHighlightSpans(range, highlight.id);
+
+	store.get(videoId).highlights.push(highlight);
+	store.requestSave(videoId);
+
+	return true;
+}
+
+/**
+ * Handles a click/tap on an existing highlight — removes it.
+ */
+function handleHighlightClick(
+	target: Node,
+	containerEl: HTMLElement,
+	videoId: string,
+	store: VideoDataStore,
+): void {
+	const highlightEl = findParentHighlight(target);
+	if (highlightEl) {
+		const highlightId = highlightEl.dataset[DATA_HIGHLIGHT_ID];
+		if (highlightId) {
+			removeHighlight(highlightId, containerEl, videoId, store);
+		}
+	}
 }
 
 // ─── DOM range → entry mapping ───────────────────────────────────────
@@ -442,3 +556,5 @@ function getLastTextNode(el: HTMLElement): Text | null {
 	}
 	return last;
 }
+
+

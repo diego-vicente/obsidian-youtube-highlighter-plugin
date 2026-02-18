@@ -107,6 +107,29 @@
 	font-size: var(--font-small);
 }
 
+/* Highlight button (mobile) */
+.yt-highlighter-highlight-button {
+	cursor: pointer;
+	font-size: var(--font-small);
+	background: transparent;
+	color: var(--text-muted);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: var(--size-4-1) var(--size-4-3);
+	transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.yt-highlighter-highlight-button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.yt-highlighter-highlight-button--active {
+	background: hsla(50, 100%, 50%, 0.3);
+	color: var(--text-normal);
+	border-color: hsla(50, 100%, 50%, 0.5);
+}
+
 /* ─── Build info (debug) ─────────────────────────────────────────── */
 
 .yt-highlighter-build-info {
