@@ -144,9 +144,23 @@ async function renderWidget(
 			rerenderTranscript();
 		};
 
+		const onDisplayModeToggle = (): void => {
+			const newMode = transcriptView.displayMode === "paragraphs" ? "subtitles" : "paragraphs";
+			const newEntrySpanMap = transcriptView.setDisplayMode(newMode);
+			transcriptView.entrySpanMap = newEntrySpanMap;
+
+			// Re-apply highlights only in paragraph mode (subtitles are read-only).
+			if (newMode === "paragraphs") {
+				highlightHandle = setupHighlighting(
+					transcriptView.containerEl, newEntrySpanMap, entries, videoId, store,
+				);
+			}
+		};
+
 		createAnnotationsView(
 			widgetEl, videoId, store, player,
 			highlightHandle, onSettingsButtonClick, transcriptView, onBreakToggle,
+			onDisplayModeToggle,
 		);
 	}
 

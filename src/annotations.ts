@@ -18,6 +18,8 @@ const CSS = {
 	highlightButtonActive: "yt-highlighter-highlight-button--active",
 	breakButton: "yt-highlighter-break-button",
 	breakButtonActive: "yt-highlighter-break-button--active",
+	displayModeButton: "yt-highlighter-display-mode-button",
+	displayModeButtonActive: "yt-highlighter-display-mode-button--active",
 	settingsButton: "yt-highlighter-settings-button",
 	input: "yt-highlighter-annotation-input",
 	toolbar: "yt-highlighter-toolbar",
@@ -43,9 +45,55 @@ export function createAnnotationsView(
 	onSettingsClick?: () => void,
 	transcriptView?: TranscriptView,
 	onBreakToggle?: (entryIndex: number, charOffset: number) => void,
+	onDisplayModeToggle?: () => void,
 ): void {
 	const toolbarEl = parentEl.createDiv({cls: CSS.toolbar});
 	const annotationsEl = parentEl.createDiv({cls: CSS.container});
+
+	/**
+	 * Buttons that are only meaningful in paragraph mode. These get
+	 * disabled when the user switches to subtitle mode.
+	 */
+	const paragraphModeButtons: HTMLButtonElement[] = [];
+
+	/**
+	 * Buttons that should be completely hidden in subtitle mode.
+	 */
+	const paragraphModeHiddenButtons: HTMLButtonElement[] = [];
+
+	// ── Display mode toggle button (first in toolbar) ────────────────
+
+	if (transcriptView && onDisplayModeToggle) {
+		/** U+00B6 pilcrow ¶ — shown when in paragraph mode (click to switch to subtitles). */
+		const ICON_PARAGRAPHS = "\u00B6";
+		/** U+2261 triple bar ≡ — shown when in subtitle mode (click to switch to paragraphs). */
+		const ICON_SUBTITLES = "\u2261";
+
+		const displayModeButton = toolbarEl.createEl("button", {
+			cls: CSS.displayModeButton,
+			text: ICON_PARAGRAPHS,
+			attr: {"aria-label": "Toggle subtitle view"},
+		});
+
+		displayModeButton.addEventListener("click", () => {
+			onDisplayModeToggle();
+			const isSubtitleMode = transcriptView.displayMode === "subtitles";
+			displayModeButton.textContent = isSubtitleMode ? ICON_SUBTITLES : ICON_PARAGRAPHS;
+			if (isSubtitleMode) {
+				displayModeButton.addClass(CSS.displayModeButtonActive);
+			} else {
+				displayModeButton.removeClass(CSS.displayModeButtonActive);
+			}
+			// Disable paragraph-only buttons in subtitle mode.
+			for (const btn of paragraphModeButtons) {
+				btn.disabled = isSubtitleMode;
+			}
+			// Hide paragraph-only buttons in subtitle mode.
+			for (const btn of paragraphModeHiddenButtons) {
+				btn.style.display = isSubtitleMode ? "none" : "";
+			}
+		});
+	}
 
 	// ── Highlight button (mobile only) ───────────────────────────────
 
@@ -70,6 +118,8 @@ export function createAnnotationsView(
 		highlightButton.addEventListener("click", () => {
 			highlightHandle.highlightStashedSelection();
 		});
+
+		paragraphModeButtons.push(highlightButton);
 	}
 
 	// ── Add annotation button ────────────────────────────────────────
@@ -110,6 +160,9 @@ export function createAnnotationsView(
 				transcriptView.containerEl.removeClass("yt-highlighter-transcript--break-mode");
 			}
 		});
+
+		paragraphModeButtons.push(breakButton);
+		paragraphModeHiddenButtons.push(breakButton);
 	}
 
 	// ── Transcript settings button ───────────────────────────────────
@@ -125,6 +178,7 @@ export function createAnnotationsView(
 		});
 
 		settingsButton.addEventListener("click", onSettingsClick);
+		paragraphModeButtons.push(settingsButton);
 	}
 
 	// Render existing annotations.

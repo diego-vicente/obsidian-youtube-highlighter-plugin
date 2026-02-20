@@ -1,20 +1,28 @@
-import type {TranscriptEntry, TranscriptDisplaySettings, SeparatorRule, ManualBreak} from "./types";
+import type {TranscriptEntry, TranscriptDisplaySettings, SeparatorRule, ManualBreak, DisplayMode} from "./types";
 import {DEFAULT_TRANSCRIPT_DISPLAY_SETTINGS} from "./types";
 import type {PlayerWrapper} from "./player";
 import {PlayerState} from "./player";
+import {secondsToTimestamp} from "./utils/time";
 
 const SYNC_POLL_INTERVAL_MS = 250;
 const SCROLL_CENTER_DIVISOR = 2;
+
+/** Default display mode when none is specified. */
+const DEFAULT_DISPLAY_MODE: DisplayMode = "paragraphs";
 
 /** CSS class names used by the transcript view. */
 const CSS = {
 	container: "yt-highlighter-transcript",
 	containerBreakMode: "yt-highlighter-transcript--break-mode",
+	containerSubtitleMode: "yt-highlighter-transcript--subtitle-mode",
 	paragraph: "yt-highlighter-transcript-paragraph",
 	segment: "yt-highlighter-transcript-segment",
 	segmentActive: "yt-highlighter-transcript-segment--active",
 	breakMarker: "yt-highlighter-transcript-segment--break",
 	empty: "yt-highlighter-transcript-empty",
+	subtitleRow: "yt-highlighter-subtitle-row",
+	subtitleTimestamp: "yt-highlighter-subtitle-timestamp",
+	subtitleText: "yt-highlighter-subtitle-text",
 } as const;
 
 export interface TranscriptView {
@@ -35,6 +43,10 @@ export interface TranscriptView {
 	breakMode: boolean;
 	/** Set the callback for break toggle clicks (called with entry index + char offset). */
 	setBreakToggleHandler(handler: (entryIndex: number, charOffset: number) => void): void;
+	/** The current display mode ("paragraphs" or "subtitles"). */
+	displayMode: DisplayMode;
+	/** Switch between display modes. Triggers a full re-render. Returns the new entrySpanMap. */
+	setDisplayMode(mode: DisplayMode): HTMLElement[][];
 	/** Clean up all resources. */
 	destroy(): void;
 }
@@ -341,6 +353,8 @@ export function createTranscriptView(
 			rerender: () => [],
 			breakMode: false,
 			setBreakToggleHandler: (_handler: (entryIndex: number, charOffset: number) => void) => { /* noop */ },
+			displayMode: DEFAULT_DISPLAY_MODE,
+			setDisplayMode: () => [],
 			destroy: noop,
 		};
 	}
@@ -351,7 +365,12 @@ export function createTranscriptView(
 		breakToggleHandler: null as ((entryIndex: number, charOffset: number) => void) | null,
 	};
 
-	let entrySpanMap = renderWithSettings(containerEl, entries, player, settings, breaks, interactionState);
+	/** Tracks the current display mode and last-used paragraph settings/breaks. */
+	let currentMode: DisplayMode = DEFAULT_DISPLAY_MODE;
+	let lastSettings = settings;
+	let lastBreaks = breaks;
+
+	let entrySpanMap = renderForMode(containerEl, currentMode, entries, player, lastSettings, lastBreaks, interactionState);
 
 	let syncInterval: number | null = null;
 	let activeIndex = -1;
@@ -377,9 +396,10 @@ export function createTranscriptView(
 			}
 			const firstSpan = spans[0];
 			if (firstSpan) {
-				const paragraph = firstSpan.parentElement;
-				if (paragraph) {
-					scrollToElementInContainer(containerEl, paragraph);
+				// In subtitle mode, scroll the row itself; in paragraph mode, scroll the paragraph.
+				const scrollTarget = currentMode === "subtitles" ? firstSpan.parentElement : firstSpan.parentElement;
+				if (scrollTarget) {
+					scrollToElementInContainer(containerEl, scrollTarget);
 				}
 			}
 		}
@@ -416,12 +436,28 @@ export function createTranscriptView(
 		stopSync();
 	}
 
-	function rerender(newSettings: TranscriptDisplaySettings, manualBreaks: ManualBreak[]): HTMLElement[][] {
-		// Clear existing content and re-render with new settings.
+	function fullRerender(): HTMLElement[][] {
 		containerEl.empty();
 		activeIndex = -1;
-		entrySpanMap = renderWithSettings(containerEl, entries, player, newSettings, manualBreaks, interactionState);
+		entrySpanMap = renderForMode(containerEl, currentMode, entries, player, lastSettings, lastBreaks, interactionState);
 		return entrySpanMap;
+	}
+
+	function rerender(newSettings: TranscriptDisplaySettings, manualBreaks: ManualBreak[]): HTMLElement[][] {
+		lastSettings = newSettings;
+		lastBreaks = manualBreaks;
+		return fullRerender();
+	}
+
+	function setDisplayMode(mode: DisplayMode): HTMLElement[][] {
+		currentMode = mode;
+		// Toggle subtitle-mode CSS class on the container.
+		if (mode === "subtitles") {
+			containerEl.addClass(CSS.containerSubtitleMode);
+		} else {
+			containerEl.removeClass(CSS.containerSubtitleMode);
+		}
+		return fullRerender();
 	}
 
 	// Auto-start/stop sync with player state.
@@ -440,6 +476,8 @@ export function createTranscriptView(
 		setBreakToggleHandler(handler: (entryIndex: number, charOffset: number) => void) {
 			interactionState.breakToggleHandler = handler;
 		},
+		get displayMode() { return currentMode; },
+		setDisplayMode,
 	};
 }
 
@@ -454,6 +492,69 @@ interface InteractionState {
 	breakMode: boolean;
 	breakToggleHandler: ((entryIndex: number, charOffset: number) => void) | null;
 }
+
+/**
+ * Dispatches rendering to the appropriate mode.
+ * - "paragraphs": grouped prose with separator rules, breaks, and highlights.
+ * - "subtitles": one row per entry with timestamp + text.
+ */
+function renderForMode(
+	containerEl: HTMLElement,
+	mode: DisplayMode,
+	entries: TranscriptEntry[],
+	player: PlayerWrapper,
+	settings: TranscriptDisplaySettings,
+	manualBreaks: ManualBreak[],
+	interactionState: InteractionState,
+): HTMLElement[][] {
+	if (mode === "subtitles") {
+		return renderSubtitles(containerEl, entries, player);
+	}
+	return renderWithSettings(containerEl, entries, player, settings, manualBreaks, interactionState);
+}
+
+// ─── Subtitle mode ───────────────────────────────────────────────────
+
+/**
+ * Renders the transcript as a list of subtitle rows: each entry gets
+ * its own row with a timestamp on the left and the text on the right.
+ * Clicking the timestamp or text seeks to that point.
+ */
+function renderSubtitles(
+	containerEl: HTMLElement,
+	entries: TranscriptEntry[],
+	player: PlayerWrapper,
+): HTMLElement[][] {
+	const entrySpanMap: HTMLElement[][] = entries.map(() => []);
+
+	for (let i = 0; i < entries.length; i++) {
+		const entry = entries[i];
+		if (!entry) continue;
+
+		const rowEl = containerEl.createDiv({cls: CSS.subtitleRow});
+
+		const timestampEl = rowEl.createSpan({
+			cls: CSS.subtitleTimestamp,
+			text: secondsToTimestamp(entry.offset),
+		});
+
+		const textEl = rowEl.createSpan({
+			cls: CSS.subtitleText,
+			text: entry.text.replace(/\n/g, " "),
+		});
+
+		// Click anywhere on the row to seek.
+		const offset = entry.offset;
+		timestampEl.addEventListener("click", () => { void player.seekTo(offset); });
+		textEl.addEventListener("click", () => { void player.seekTo(offset); });
+
+		entrySpanMap[i]?.push(textEl);
+	}
+
+	return entrySpanMap;
+}
+
+// ─── Paragraph mode ─────────────────────────────────────────────────
 
 function renderWithSettings(
 	containerEl: HTMLElement,

@@ -223,5 +223,14 @@ export function createEmptyPluginData(): PluginData {
 	};
 }
 
+/**
+ * Transcript display mode.
+ * - "paragraphs": flowing prose with separator-based paragraph grouping,
+ *   highlights, and manual breaks (the default editing view).
+ * - "subtitles": one line per transcript entry with timestamps on the left
+ *   (a read-only, subtitle-like view).
+ */
+export type DisplayMode = "paragraphs" | "subtitles";
+
 /** The language identifier used with registerMarkdownCodeBlockProcessor. */
 export const CODE_BLOCK_LANGUAGE = "youtube-highlights";

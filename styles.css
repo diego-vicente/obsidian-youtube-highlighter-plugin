@@ -234,6 +234,70 @@
 	margin-bottom: var(--size-4-2);
 }
 
+/* ─── Subtitle mode ──────────────────────────────────────────────── */
+
+.yt-highlighter-subtitle-row {
+	display: flex;
+	align-items: baseline;
+	gap: var(--size-4-2);
+	padding: var(--size-4-1) 0;
+	font-size: var(--font-small);
+	line-height: 1.5;
+	cursor: pointer;
+	border-radius: var(--radius-s);
+	transition: background-color 150ms ease;
+}
+
+.yt-highlighter-subtitle-row:hover {
+	background: var(--background-modifier-hover);
+}
+
+.yt-highlighter-subtitle-timestamp {
+	flex-shrink: 0;
+	color: var(--text-muted);
+	font-family: var(--font-monospace);
+	font-size: var(--font-smallest);
+	min-width: 3.5em;
+	text-align: right;
+	user-select: none;
+}
+
+.yt-highlighter-subtitle-text {
+	color: var(--text-normal);
+	border-radius: var(--radius-s);
+	transition: background-color 150ms ease, color 150ms ease;
+}
+
+/* Active subtitle row follows playback */
+.yt-highlighter-subtitle-text.yt-highlighter-transcript-segment--active {
+	background: hsla(var(--interactive-accent-hsl), 0.2);
+	color: var(--interactive-accent);
+}
+
+/* Display mode toggle button */
+.yt-highlighter-display-mode-button {
+	cursor: pointer;
+	font-size: var(--font-ui-medium);
+	background: transparent;
+	color: var(--text-muted);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: var(--size-4-1) var(--size-4-3);
+	line-height: 1;
+	transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.yt-highlighter-display-mode-button:hover {
+	color: var(--text-normal);
+	border-color: var(--text-muted);
+}
+
+.yt-highlighter-display-mode-button--active {
+	background: hsla(var(--interactive-accent-hsl), 0.2);
+	color: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+}
+
 /* ─── Break mode ─────────────────────────────────────────────────── */
 
 /* Break toggle button in toolbar */
