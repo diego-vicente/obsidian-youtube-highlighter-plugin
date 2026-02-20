@@ -1,12 +1,13 @@
 import {MarkdownPostProcessorContext, Notice} from "obsidian";
 import type YouTubeHighlighterPlugin from "./main";
-import type {VideoData, TranscriptEntry} from "./types";
-import {CODE_BLOCK_LANGUAGE} from "./types";
+import type {VideoData, TranscriptEntry, TranscriptDisplaySettings} from "./types";
+import {CODE_BLOCK_LANGUAGE, DEFAULT_TRANSCRIPT_DISPLAY_SETTINGS, normalizeManualBreaks} from "./types";
 import {createPlayer} from "./player";
 import {fetchTranscript, parseManualTranscript} from "./transcript";
 import {createTranscriptView} from "./transcript-view";
 import {setupHighlighting} from "./highlights";
 import {createAnnotationsView} from "./annotations";
+import {TranscriptSettingsModal} from "./transcript-settings-modal";
 
 /** CSS class names used by the code block processor. */
 /** Build timestamp injected by esbuild at compile time. */
@@ -77,15 +78,68 @@ async function renderWidget(
 
 	// 3. Render the synced transcript view.
 	if (entries && entries.length > 0) {
-		const transcriptView = createTranscriptView(widgetEl, entries, player);
+		const userData = store.get(videoId);
+		const currentSettings = userData.transcriptSettings ?? DEFAULT_TRANSCRIPT_DISPLAY_SETTINGS;
+		const manualBreaks = normalizeManualBreaks(userData.manualBreaks);
+
+		const transcriptView = createTranscriptView(
+			widgetEl, entries, player, currentSettings, manualBreaks,
+		);
 
 		// 4. Set up highlighting (text selection → highlight creation).
-		const highlightHandle = setupHighlighting(
+		let highlightHandle = setupHighlighting(
 			transcriptView.containerEl, transcriptView.entrySpanMap, entries, videoId, store,
 		);
 
-		// 5. Render annotations panel and toolbar (with highlight button on mobile).
-		createAnnotationsView(widgetEl, videoId, store, player, highlightHandle);
+		/** Re-renders transcript and re-applies highlights with current data. */
+		const rerenderTranscript = (): void => {
+			const latestData = store.get(videoId);
+			const settings = latestData.transcriptSettings ?? DEFAULT_TRANSCRIPT_DISPLAY_SETTINGS;
+			const breaks = normalizeManualBreaks(latestData.manualBreaks);
+
+			const newEntrySpanMap = transcriptView.rerender(settings, breaks);
+			transcriptView.entrySpanMap = newEntrySpanMap;
+
+			highlightHandle = setupHighlighting(
+				transcriptView.containerEl, newEntrySpanMap, entries, videoId, store,
+			);
+		};
+
+		// 5. Render annotations panel and toolbar.
+		const onSettingsButtonClick = (): void => {
+			const latestSettings = store.get(videoId).transcriptSettings ?? DEFAULT_TRANSCRIPT_DISPLAY_SETTINGS;
+			new TranscriptSettingsModal(plugin.app, latestSettings, (newSettings: TranscriptDisplaySettings) => {
+				store.get(videoId).transcriptSettings = newSettings;
+				store.requestSave(videoId);
+				rerenderTranscript();
+			}).open();
+		};
+
+		const onBreakToggle = (entryIndex: number, charOffset: number): void => {
+			const data = store.get(videoId);
+			const breaks = normalizeManualBreaks(data.manualBreaks);
+
+			const existingIdx = breaks.findIndex(
+				b => b.entryIndex === entryIndex && b.charOffset === charOffset,
+			);
+
+			if (existingIdx === -1) {
+				// Insert new break, maintaining sorted order.
+				breaks.push({entryIndex, charOffset});
+				breaks.sort((a, b) => a.entryIndex - b.entryIndex || a.charOffset - b.charOffset);
+			} else {
+				breaks.splice(existingIdx, 1);
+			}
+
+			data.manualBreaks = breaks;
+			store.requestSave(videoId);
+			rerenderTranscript();
+		};
+
+		createAnnotationsView(
+			widgetEl, videoId, store, player,
+			highlightHandle, onSettingsButtonClick, transcriptView, onBreakToggle,
+		);
 	}
 
 	// Build info for debugging sync issues.

@@ -1,6 +1,6 @@
 import type YouTubeHighlighterPlugin from "./main";
 import type {VideoUserData} from "./types";
-import {createEmptyUserData} from "./types";
+import {createEmptyUserData, migrateTranscriptSettings} from "./types";
 import {debounce} from "./utils/dom";
 
 /** Directory within the plugin folder for per-video user data files. */
@@ -117,7 +117,14 @@ export class VideoDataStore {
 
 		try {
 			const raw = await adapter.read(path);
-			return JSON.parse(raw) as VideoUserData;
+			const parsed = JSON.parse(raw) as unknown as Record<string, unknown>;
+			// Migrate old single-separator format to new array format.
+			if (parsed["transcriptSettings"]) {
+				parsed["transcriptSettings"] = migrateTranscriptSettings(
+					parsed["transcriptSettings"] as Record<string, unknown>,
+				);
+			}
+			return parsed as unknown as VideoUserData;
 		} catch {
 			return createEmptyUserData();
 		}

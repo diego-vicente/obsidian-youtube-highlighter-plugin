@@ -130,6 +130,147 @@
 	border-color: hsla(50, 100%, 50%, 0.5);
 }
 
+/* Transcript settings button (gear icon) */
+.yt-highlighter-settings-button {
+	cursor: pointer;
+	font-size: var(--font-ui-medium);
+	background: transparent;
+	color: var(--text-muted);
+	border: none;
+	padding: var(--size-4-1) var(--size-4-2);
+	margin-left: auto;
+	line-height: 1;
+	transition: color 150ms ease;
+}
+
+.yt-highlighter-settings-button:hover {
+	color: var(--text-normal);
+}
+
+/* ─── Transcript settings modal ──────────────────────────────────── */
+
+.yt-highlighter-transcript-settings-modal .setting-item-description {
+	color: var(--text-muted);
+	font-size: var(--font-small);
+	margin-bottom: var(--size-4-4);
+}
+
+.yt-highlighter-transcript-settings-modal h4 {
+	margin: var(--size-4-2) 0 var(--size-4-2) 0;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+/* Separator list */
+.yt-highlighter-separator-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-2);
+}
+
+/* Each separator row: input + toggles + delete */
+.yt-highlighter-separator-row {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	padding: var(--size-4-2);
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+}
+
+.yt-highlighter-separator-input {
+	flex: 1;
+	min-width: 0;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-normal);
+	font-family: var(--font-monospace);
+	font-size: var(--font-small);
+	padding: var(--size-4-1) var(--size-4-2);
+}
+
+.yt-highlighter-separator-input:focus {
+	border-color: var(--interactive-accent);
+	outline: none;
+}
+
+.yt-highlighter-separator-label {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-1);
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	white-space: nowrap;
+	cursor: pointer;
+	user-select: none;
+}
+
+.yt-highlighter-separator-toggle {
+	margin: 0;
+}
+
+.yt-highlighter-separator-delete {
+	cursor: pointer;
+	color: var(--text-muted);
+	font-size: var(--font-ui-medium);
+	padding: 0 var(--size-4-1);
+	flex-shrink: 0;
+	line-height: 1;
+}
+
+.yt-highlighter-separator-delete:hover {
+	color: var(--text-error);
+}
+
+.yt-highlighter-regex-error {
+	color: var(--text-error);
+	font-size: var(--font-small);
+	min-height: 0;
+	margin-bottom: var(--size-4-2);
+}
+
+/* ─── Break mode ─────────────────────────────────────────────────── */
+
+/* Break toggle button in toolbar */
+.yt-highlighter-break-button {
+	cursor: pointer;
+	font-size: var(--font-small);
+	background: transparent;
+	color: var(--text-muted);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: var(--size-4-1) var(--size-4-3);
+	transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.yt-highlighter-break-button:hover {
+	color: var(--text-normal);
+	border-color: var(--text-muted);
+}
+
+.yt-highlighter-break-button--active {
+	background: hsla(var(--interactive-accent-hsl), 0.2);
+	color: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+}
+
+/* In break mode, segments show a crosshair cursor to indicate click-to-break */
+.yt-highlighter-transcript--break-mode .yt-highlighter-transcript-segment {
+	cursor: crosshair;
+}
+
+/* Visual marker on segments that have a manual break before them */
+.yt-highlighter-transcript-segment--break {
+	border-left: 2px solid var(--interactive-accent);
+	padding-left: var(--size-4-1);
+	margin-left: var(--size-4-1);
+}
+
 /* ─── Build info (debug) ─────────────────────────────────────────── */
 
 .yt-highlighter-build-info {

@@ -1,7 +1,7 @@
 import {type Editor, type MarkdownView, Notice} from "obsidian";
 import type YouTubeHighlighterPlugin from "./main";
-import type {VideoData, Highlight, Annotation, VideoUserData} from "./types";
-import {CODE_BLOCK_LANGUAGE} from "./types";
+import type {VideoData, Highlight, Annotation, VideoUserData, TranscriptEntry} from "./types";
+import {CODE_BLOCK_LANGUAGE, normalizeManualBreaks} from "./types";
 import {secondsToTimestamp} from "./utils/time";
 
 const YOUTUBE_VIDEO_URL_BASE = "https://www.youtube.com/watch?v=";
@@ -39,10 +39,13 @@ export function registerExportCommand(plugin: YouTubeHighlighterPlugin): void {
 				return true;
 			}
 
-			// Load user data (highlights/annotations) from the data store,
-			// then perform the conversion.
-			void plugin.dataStore.load(videoData.videoId).then((userData) => {
-				const markdown = convertToMarkdown(videoData, userData);
+			// Load user data (highlights/annotations) and cached transcript
+			// from the data store, then perform the conversion.
+			void plugin.dataStore.load(videoData.videoId).then(async (userData) => {
+				const entries = await loadCachedTranscript(videoData.videoId, plugin);
+				const breaks = normalizeManualBreaks(userData.manualBreaks);
+				const breakTimestamps = resolveBreakTimestamps(breaks, entries ?? []);
+				const markdown = convertToMarkdown(videoData, userData, breakTimestamps);
 				replaceCodeBlock(editor, codeBlock, markdown);
 				// eslint-disable-next-line obsidianmd/ui/sentence-case -- "markdown" is a proper noun here
 				new Notice("Converted to markdown.");
@@ -155,8 +158,14 @@ function parseVideoDataFromBlock(content: string): VideoData | null {
  * ```
  *
  * Highlights and annotations are merged and sorted by timestamp.
+ * If `breakTimestamps` is provided, a blank line is inserted between
+ * consecutive items whenever a manual break falls between them.
  */
-function convertToMarkdown(videoData: VideoData, userData: VideoUserData): string {
+function convertToMarkdown(
+	videoData: VideoData,
+	userData: VideoUserData,
+	breakTimestamps: number[] = [],
+): string {
 	const videoUrl = `${YOUTUBE_VIDEO_URL_BASE}${videoData.videoId}`;
 	const lines: string[] = [];
 
@@ -179,7 +188,18 @@ function convertToMarkdown(videoData: VideoData, userData: VideoUserData): strin
 	// Sort by timestamp; if equal, highlights before annotations (arbitrary but consistent).
 	items.sort((a, b) => a.timestamp - b.timestamp);
 
-	for (const item of items) {
+	for (let i = 0; i < items.length; i++) {
+		const item = items[i];
+		if (!item) continue;
+
+		// Insert a blank line if a manual break falls between this item and the previous one.
+		if (i > 0) {
+			const prevItem = items[i - 1];
+			if (prevItem && hasBreakBetween(prevItem.timestamp, item.timestamp, breakTimestamps)) {
+				lines.push("");
+			}
+		}
+
 		lines.push(item.markdown);
 	}
 
@@ -190,6 +210,18 @@ function convertToMarkdown(videoData: VideoData, userData: VideoUserData): strin
 	}
 
 	return lines.join("\n");
+}
+
+/**
+ * Returns true if any break timestamp falls strictly between `startTime` and `endTime`.
+ * Both arrays are assumed sorted in ascending order.
+ */
+function hasBreakBetween(startTime: number, endTime: number, breakTimestamps: number[]): boolean {
+	for (const bt of breakTimestamps) {
+		if (bt > startTime && bt <= endTime) return true;
+		if (bt > endTime) break;
+	}
+	return false;
 }
 
 /**
@@ -231,4 +263,57 @@ function replaceCodeBlock(
 	const lastLine = editor.getLine(codeBlock.endLine);
 	const to = {line: codeBlock.endLine, ch: lastLine.length};
 	editor.replaceRange(markdown, from, to);
+}
+
+// ─── Transcript cache helpers ────────────────────────────────────────
+
+const TRANSCRIPT_CACHE_DIR = "transcripts";
+
+/**
+ * Loads the cached transcript entries for a video, if available.
+ */
+async function loadCachedTranscript(
+	videoId: string,
+	plugin: YouTubeHighlighterPlugin,
+): Promise<TranscriptEntry[] | null> {
+	const pluginDir = plugin.manifest.dir;
+	if (!pluginDir) return null;
+
+	const adapter = plugin.app.vault.adapter;
+	const filePath = `${pluginDir}/${TRANSCRIPT_CACHE_DIR}/${videoId}.json`;
+
+	if (!(await adapter.exists(filePath))) {
+		return null;
+	}
+
+	try {
+		const raw = await adapter.read(filePath);
+		return JSON.parse(raw) as TranscriptEntry[];
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Converts manual breaks to their corresponding transcript timestamps.
+ * Returns a sorted array of timestamps. Mid-entry breaks map to the
+ * same entry's offset (the break is visual, not temporal).
+ */
+function resolveBreakTimestamps(
+	manualBreaks: import("./types").ManualBreak[],
+	entries: TranscriptEntry[],
+): number[] {
+	if (entries.length === 0 || manualBreaks.length === 0) return [];
+
+	const timestamps: number[] = [];
+	for (const brk of manualBreaks) {
+		if (brk.entryIndex >= 0 && brk.entryIndex < entries.length) {
+			const entry = entries[brk.entryIndex];
+			if (entry) {
+				timestamps.push(entry.offset);
+			}
+		}
+	}
+
+	return timestamps;
 }

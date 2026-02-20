@@ -485,6 +485,10 @@ function restoreHighlights(
 /**
  * Restores a single highlight by creating a DOM Range from the stored
  * entry indices and character offsets, then wrapping it in <mark> elements.
+ *
+ * When an entry is split into multiple spans (via separator or manual break
+ * splitting), the character offset is resolved by walking through all spans
+ * sequentially, treating them as a contiguous text range.
  */
 function restoreHighlight(
 	highlight: Highlight,
@@ -495,13 +499,10 @@ function restoreHighlight(
 	const endSpans = entrySpanMap[highlight.endEntryIndex];
 	if (!startSpans?.length || !endSpans?.length) return;
 
-	// Find the text node + offset for the start boundary.
-	const startSpan = startSpans[0];
-	const endSpan = endSpans[endSpans.length - 1];
-	if (!startSpan || !endSpan) return;
-
-	const startPoint = findTextNodeAtOffset(startSpan, highlight.startCharOffset);
-	const endPoint = findTextNodeAtOffset(endSpan, highlight.endCharOffset);
+	// Find the text node + offset for the start boundary by walking all spans
+	// for the start entry until we accumulate enough characters.
+	const startPoint = findTextNodeAtOffsetAcrossSpans(startSpans, highlight.startCharOffset);
+	const endPoint = findTextNodeAtOffsetAcrossSpans(endSpans, highlight.endCharOffset);
 	if (!startPoint || !endPoint) return;
 
 	try {
@@ -519,28 +520,37 @@ function restoreHighlight(
 }
 
 /**
- * Finds the text node and local offset within an element that corresponds
- * to the given character offset in the element's full text content.
+ * Finds a text node and local offset within a sequence of spans, treating
+ * them as a contiguous text. Walks through all spans in order, accumulating
+ * character counts until the target offset is reached.
+ *
+ * This handles the case where an entry is split into multiple spans
+ * (e.g., by separator splitting or mid-entry manual breaks).
  */
-function findTextNodeAtOffset(
-	el: HTMLElement,
+function findTextNodeAtOffsetAcrossSpans(
+	spans: HTMLElement[],
 	charOffset: number,
 ): {node: Text; offset: number} | null {
 	let remaining = charOffset;
 
-	const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-	let textNode: Text | null;
-	while ((textNode = walker.nextNode() as Text | null)) {
-		if (remaining <= textNode.length) {
-			return {node: textNode, offset: remaining};
+	for (const span of spans) {
+		const walker = document.createTreeWalker(span, NodeFilter.SHOW_TEXT);
+		let textNode: Text | null;
+		while ((textNode = walker.nextNode() as Text | null)) {
+			if (remaining <= textNode.length) {
+				return {node: textNode, offset: remaining};
+			}
+			remaining -= textNode.length;
 		}
-		remaining -= textNode.length;
 	}
 
 	// If offset is beyond the end, clamp to the last position.
-	const lastText = getLastTextNode(el);
-	if (lastText) {
-		return {node: lastText, offset: lastText.length};
+	const lastSpan = spans[spans.length - 1];
+	if (lastSpan) {
+		const lastText = getLastTextNode(lastSpan);
+		if (lastText) {
+			return {node: lastText, offset: lastText.length};
+		}
 	}
 
 	return null;

@@ -3,6 +3,7 @@ import type {Annotation} from "./types";
 import type {VideoDataStore} from "./video-data-store";
 import type {PlayerWrapper} from "./player";
 import type {HighlightHandle} from "./highlights";
+import type {TranscriptView} from "./transcript-view";
 import {secondsToTimestamp} from "./utils/time";
 
 /** CSS class names used by the annotations UI. */
@@ -15,6 +16,9 @@ const CSS = {
 	addButton: "yt-highlighter-annotation-add",
 	highlightButton: "yt-highlighter-highlight-button",
 	highlightButtonActive: "yt-highlighter-highlight-button--active",
+	breakButton: "yt-highlighter-break-button",
+	breakButtonActive: "yt-highlighter-break-button--active",
+	settingsButton: "yt-highlighter-settings-button",
 	input: "yt-highlighter-annotation-input",
 	toolbar: "yt-highlighter-toolbar",
 } as const;
@@ -36,6 +40,9 @@ export function createAnnotationsView(
 	store: VideoDataStore,
 	player: PlayerWrapper,
 	highlightHandle?: HighlightHandle,
+	onSettingsClick?: () => void,
+	transcriptView?: TranscriptView,
+	onBreakToggle?: (entryIndex: number, charOffset: number) => void,
 ): void {
 	const toolbarEl = parentEl.createDiv({cls: CSS.toolbar});
 	const annotationsEl = parentEl.createDiv({cls: CSS.container});
@@ -80,6 +87,45 @@ export function createAnnotationsView(
 			renderAnnotations(annotationsEl, videoId, store, player);
 		});
 	});
+
+	// ── Break mode toggle button ─────────────────────────────────────
+
+	if (transcriptView && onBreakToggle) {
+		const breakButton = toolbarEl.createEl("button", {
+			cls: CSS.breakButton,
+			text: "Break",
+			attr: {"aria-label": "Toggle break mode"},
+		});
+
+		// Wire the break handler into the transcript view.
+		transcriptView.setBreakToggleHandler(onBreakToggle);
+
+		breakButton.addEventListener("click", () => {
+			transcriptView.breakMode = !transcriptView.breakMode;
+			if (transcriptView.breakMode) {
+				breakButton.addClass(CSS.breakButtonActive);
+				transcriptView.containerEl.addClass("yt-highlighter-transcript--break-mode");
+			} else {
+				breakButton.removeClass(CSS.breakButtonActive);
+				transcriptView.containerEl.removeClass("yt-highlighter-transcript--break-mode");
+			}
+		});
+	}
+
+	// ── Transcript settings button ───────────────────────────────────
+
+	if (onSettingsClick) {
+		const settingsButton = toolbarEl.createEl("button", {
+			cls: CSS.settingsButton,
+			// U+2699 gear character
+			text: "\u2699",
+			attr: {
+				"aria-label": "Transcript settings",
+			},
+		});
+
+		settingsButton.addEventListener("click", onSettingsClick);
+	}
 
 	// Render existing annotations.
 	renderAnnotations(annotationsEl, videoId, store, player);
