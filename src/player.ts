@@ -45,12 +45,20 @@ const CSS_PLAYER = "yt-highlighter-player";
 export interface PlayerWrapper {
 	/** The container div holding the iframe. */
 	containerEl: HTMLElement;
+	/**
+	 * Resolves when the player is ready to accept commands.
+	 * For the direct player this resolves immediately; for the bridge
+	 * player it resolves when the bridge page sends the "ready" message.
+	 */
+	ready: Promise<void>;
 	/** Get current playback time in seconds. */
 	getCurrentTime(): Promise<number>;
 	/** Get the current player state. */
 	getPlayerState(): Promise<number>;
 	/** Seek to a position in seconds. */
 	seekTo(seconds: number): Promise<void>;
+	/** Pause playback. */
+	pause(): Promise<void>;
 	/** Destroy the player and clean up. */
 	destroy(): Promise<void>;
 	/** Register a callback for player state changes. */
@@ -89,6 +97,8 @@ function createDirectPlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 
 	return {
 		containerEl,
+		// youtube-player internally queues commands until ready.
+		ready: Promise.resolve(),
 
 		async getCurrentTime() {
 			return instance.getCurrentTime();
@@ -101,6 +111,10 @@ function createDirectPlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 		async seekTo(seconds: number) {
 			const ALLOW_SEEK_AHEAD = true;
 			await instance.seekTo(seconds, ALLOW_SEEK_AHEAD);
+		},
+
+		async pause() {
+			await instance.pauseVideo();
 		},
 
 		async destroy() {
@@ -150,6 +164,10 @@ function createBridgePlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 	iframe.setAttribute("frameborder", "0");
 	containerEl.appendChild(iframe);
 
+	// Ready gate: resolves when the bridge page sends the "ready" message.
+	let resolveReady: () => void;
+	const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
+
 	const stateChangeHandlers: Array<(state: number) => void> = [];
 
 	/**
@@ -180,6 +198,10 @@ function createBridgePlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 		const data = event.data;
 
 		switch (data.type) {
+			case "ready":
+				resolveReady();
+				break;
+
 			case "stateChange":
 				if (data.state !== undefined) {
 					for (const handler of stateChangeHandlers) {
@@ -245,6 +267,7 @@ function createBridgePlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 
 	return {
 		containerEl,
+		ready,
 
 		async getCurrentTime() {
 			return sendRequest("getCurrentTime");
@@ -261,6 +284,10 @@ function createBridgePlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 
 		async seekTo(seconds: number) {
 			sendCommand({action: "seekTo", seconds});
+		},
+
+		async pause() {
+			sendCommand({action: "pause"});
 		},
 
 		async destroy() {

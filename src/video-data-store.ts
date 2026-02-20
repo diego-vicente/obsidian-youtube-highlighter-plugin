@@ -1,68 +1,80 @@
 import type YouTubeHighlighterPlugin from "./main";
-import type {VideoUserData} from "./types";
-import {createEmptyUserData, migrateTranscriptSettings} from "./types";
+import type {VideoUserData, PluginData} from "./types";
+import {createEmptyUserData, createEmptyPluginData, migrateTranscriptSettings} from "./types";
 import {debounce} from "./utils/dom";
 
-/** Directory within the plugin folder for per-video user data files. */
-const USER_DATA_DIR = "data";
+/**
+ * Legacy directory within the plugin folder where per-video JSON files
+ * were stored before the migration to plugin loadData/saveData.
+ */
+const LEGACY_DATA_DIR = "data";
 
 /** Delay before flushing changes to disk (batches rapid edits). */
 const SAVE_DEBOUNCE_MS = 500;
 
 /**
- * Persists highlights and annotations per video in the plugin data folder.
+ * Persists all per-video user data (highlights, annotations, playback
+ * position, etc.) via Obsidian's `plugin.saveData()` mechanism.
  *
- * Data is stored at `<pluginDir>/data/<videoId>.json`, completely separate
- * from the code block. This means changes never trigger Obsidian's code
- * block re-render cycle.
+ * Data lives in `data.json` alongside plugin settings, which means
+ * Obsidian Sync covers it automatically. The store keeps the full
+ * `PluginData` object in memory and debounces writes.
  *
- * Each video gets its own in-memory cache and debounced save.
+ * On first use it migrates any legacy per-video JSON files from the
+ * old `data/` subfolder into the unified `data.json`.
  */
 export class VideoDataStore {
 	private plugin: YouTubeHighlighterPlugin;
 
-	/** In-memory cache of loaded video data. */
-	private cache = new Map<string, VideoUserData>();
+	/** The full plugin data object (settings + all video data). */
+	private pluginData: PluginData = createEmptyPluginData();
 
-	/** Per-video debounced save functions. */
-	private debouncedSaves = new Map<string, () => void>();
+	/** Single debounced save for the entire plugin data blob. */
+	private debouncedSave: () => void;
 
 	constructor(plugin: YouTubeHighlighterPlugin) {
 		this.plugin = plugin;
+		this.debouncedSave = debounce(() => { void this.flush(); }, SAVE_DEBOUNCE_MS);
 	}
 
 	/**
-	 * Loads user data for a video. Returns cached version if available,
-	 * otherwise reads from disk. Returns empty data if no file exists.
+	 * Initializes the store by loading `data.json` via `plugin.loadData()`
+	 * and migrating any legacy per-video files from the `data/` subfolder.
+	 * Must be called once during `onload()` before any other method.
+	 */
+	async initialize(): Promise<void> {
+		const raw = await this.plugin.loadData() as Record<string, unknown> | null;
+		this.pluginData = this.parsePluginData(raw);
+		await this.migrateLegacyFiles();
+	}
+
+	/** Returns the plugin-wide settings object (mutable reference). */
+	get settings(): PluginData["settings"] {
+		return this.pluginData.settings;
+	}
+
+	/**
+	 * Loads user data for a video. Returns existing data or creates an
+	 * empty entry. No async I/O needed — everything is already in memory.
 	 */
 	async load(videoId: string): Promise<VideoUserData> {
-		const cached = this.cache.get(videoId);
-		if (cached) return cached;
-
-		const data = await this.readFromDisk(videoId);
-		this.cache.set(videoId, data);
-		return data;
+		return this.getOrCreate(videoId);
 	}
 
 	/**
-	 * Returns the in-memory data for a video. Must call `load()` first.
-	 * Returns empty data if not yet loaded (defensive).
+	 * Returns the in-memory data for a video (synchronous).
+	 * Creates an empty entry if none exists yet.
 	 */
 	get(videoId: string): VideoUserData {
-		return this.cache.get(videoId) ?? createEmptyUserData();
+		return this.getOrCreate(videoId);
 	}
 
 	/**
-	 * Schedules a debounced save of the video's data to disk.
+	 * Schedules a debounced save of the entire plugin data to disk.
 	 * Call this after mutating the data returned by `get()` or `load()`.
 	 */
-	requestSave(videoId: string): void {
-		let save = this.debouncedSaves.get(videoId);
-		if (!save) {
-			save = debounce(() => { void this.writeToDisk(videoId); }, SAVE_DEBOUNCE_MS);
-			this.debouncedSaves.set(videoId, save);
-		}
-		save();
+	requestSave(_videoId?: string): void {
+		this.debouncedSave();
 	}
 
 	/**
@@ -78,67 +90,127 @@ export class VideoDataStore {
 	): Promise<void> {
 		if (annotations.length === 0) return;
 
-		const data = await this.load(videoId);
+		const data = this.getOrCreate(videoId);
 
 		// Only import if the data store has no annotations yet (first migration).
 		if (data.annotations.length === 0) {
 			data.annotations.push(...annotations);
-			await this.writeToDisk(videoId);
+			await this.flush();
 		}
 	}
 
-	// ─── Disk I/O ────────────────────────────────────────────────────
+	// ─── Persistence ─────────────────────────────────────────────────
 
-	private dataFilePath(videoId: string): string {
-		return `${this.plugin.manifest.dir}/${USER_DATA_DIR}/${videoId}.json`;
+	/** Immediately writes the full plugin data blob via saveData(). */
+	async flush(): Promise<void> {
+		await this.plugin.saveData(this.pluginData);
 	}
 
-	private async ensureDataDir(): Promise<void> {
+	// ─── Internal helpers ────────────────────────────────────────────
+
+	private getOrCreate(videoId: string): VideoUserData {
+		let data = this.pluginData.videoData[videoId];
+		if (!data) {
+			data = createEmptyUserData();
+			this.pluginData.videoData[videoId] = data;
+		}
+		return data;
+	}
+
+	/**
+	 * Parses raw data from `loadData()` into a `PluginData` object.
+	 * Handles three cases:
+	 * 1. null / undefined → fresh install, return defaults.
+	 * 2. Has `videoData` key → already in the new format.
+	 * 3. Has `transcriptLanguage` key → old settings-only format, wrap it.
+	 */
+	private parsePluginData(raw: Record<string, unknown> | null): PluginData {
+		if (!raw) return createEmptyPluginData();
+
+		// New format: has videoData map.
+		if (raw["videoData"] && typeof raw["videoData"] === "object") {
+			const settings = (raw["settings"] as PluginData["settings"]) ?? {...createEmptyPluginData().settings};
+			const videoData = raw["videoData"] as Record<string, VideoUserData>;
+
+			// Migrate transcript settings within each video entry.
+			for (const videoId of Object.keys(videoData)) {
+				const entry = videoData[videoId];
+				if (entry && entry.transcriptSettings) {
+					const migrated = migrateTranscriptSettings(
+						entry.transcriptSettings as unknown as Record<string, unknown>,
+					);
+					if (migrated) entry.transcriptSettings = migrated;
+				}
+			}
+
+			return {settings, videoData};
+		}
+
+		// Old format: raw IS the settings object (e.g. { transcriptLanguage: "en" }).
+		const result = createEmptyPluginData();
+		if (typeof raw["transcriptLanguage"] === "string") {
+			result.settings.transcriptLanguage = raw["transcriptLanguage"];
+		}
+		return result;
+	}
+
+	// ─── Legacy migration ────────────────────────────────────────────
+
+	/**
+	 * Reads any per-video JSON files from the old `data/` subfolder and
+	 * merges them into `pluginData.videoData`. Only runs once — after
+	 * migrating, the files are left in place but never read again
+	 * (the in-memory data takes precedence).
+	 */
+	private async migrateLegacyFiles(): Promise<void> {
 		const pluginDir = this.plugin.manifest.dir;
 		if (!pluginDir) return;
 
-		const dir = `${pluginDir}/${USER_DATA_DIR}`;
 		const adapter = this.plugin.app.vault.adapter;
-		if (!(await adapter.exists(dir))) {
-			await adapter.mkdir(dir);
-		}
-	}
+		const legacyDir = `${pluginDir}/${LEGACY_DATA_DIR}`;
 
-	private async readFromDisk(videoId: string): Promise<VideoUserData> {
-		const pluginDir = this.plugin.manifest.dir;
-		if (!pluginDir) return createEmptyUserData();
-
-		const adapter = this.plugin.app.vault.adapter;
-		const path = this.dataFilePath(videoId);
-
-		if (!(await adapter.exists(path))) {
-			return createEmptyUserData();
-		}
+		if (!(await adapter.exists(legacyDir))) return;
 
 		try {
-			const raw = await adapter.read(path);
-			const parsed = JSON.parse(raw) as unknown as Record<string, unknown>;
-			// Migrate old single-separator format to new array format.
-			if (parsed["transcriptSettings"]) {
-				parsed["transcriptSettings"] = migrateTranscriptSettings(
-					parsed["transcriptSettings"] as Record<string, unknown>,
-				);
+			const listing = await adapter.list(legacyDir);
+			const jsonFiles = listing.files.filter(f => f.endsWith(".json"));
+
+			if (jsonFiles.length === 0) return;
+
+			let migrated = false;
+
+			for (const filePath of jsonFiles) {
+				// Extract videoId from filename: "data/XKSjCOKDtpk.json" → "XKSjCOKDtpk"
+				const fileName = filePath.split("/").pop() ?? "";
+				const videoId = fileName.replace(/\.json$/, "");
+				if (!videoId) continue;
+
+				// Skip if we already have data for this video in the new store.
+				if (this.pluginData.videoData[videoId]) continue;
+
+				try {
+					const raw = await adapter.read(filePath);
+					const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+					// Migrate old transcript settings format.
+					if (parsed["transcriptSettings"]) {
+						parsed["transcriptSettings"] = migrateTranscriptSettings(
+							parsed["transcriptSettings"] as Record<string, unknown>,
+						);
+					}
+
+					this.pluginData.videoData[videoId] = parsed as unknown as VideoUserData;
+					migrated = true;
+				} catch {
+					// Skip files that can't be read/parsed.
+				}
 			}
-			return parsed as unknown as VideoUserData;
+
+			if (migrated) {
+				await this.flush();
+			}
 		} catch {
-			return createEmptyUserData();
+			// If listing fails (e.g. directory not readable), just skip migration.
 		}
-	}
-
-	private async writeToDisk(videoId: string): Promise<void> {
-		const pluginDir = this.plugin.manifest.dir;
-		if (!pluginDir) return;
-
-		const data = this.cache.get(videoId);
-		if (!data) return;
-
-		await this.ensureDataDir();
-		const adapter = this.plugin.app.vault.adapter;
-		await adapter.write(this.dataFilePath(videoId), JSON.stringify(data, null, 2));
 	}
 }

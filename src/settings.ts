@@ -1,15 +1,6 @@
 import {App, PluginSettingTab, Setting} from "obsidian";
 import type YouTubeHighlighterPlugin from "./main";
 
-export interface YouTubeHighlighterSettings {
-	/** Preferred language code for auto-fetched transcripts (e.g. "en", "es"). */
-	transcriptLanguage: string;
-}
-
-export const DEFAULT_SETTINGS: YouTubeHighlighterSettings = {
-	transcriptLanguage: "en",
-};
-
 export class YouTubeHighlighterSettingTab extends PluginSettingTab {
 	plugin: YouTubeHighlighterPlugin;
 

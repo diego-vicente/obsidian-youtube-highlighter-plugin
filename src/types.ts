@@ -115,6 +115,12 @@ export interface VideoUserData {
 	 * Can be either the new ManualBreak[] format or the legacy number[] format.
 	 */
 	manualBreaks?: ManualBreak[] | number[];
+	/**
+	 * Last known playback position in seconds. Persisted so the video
+	 * resumes where the user left off. When the video has been watched
+	 * to completion (ENDED state), this is reset to 0 on next load.
+	 */
+	playbackPosition?: number;
 }
 
 /**
@@ -185,6 +191,35 @@ export function createEmptyUserData(): VideoUserData {
 	return {
 		highlights: [],
 		annotations: [],
+	};
+}
+
+/**
+ * Top-level structure persisted via `plugin.saveData()` into `data.json`.
+ * Combines plugin-wide settings and all per-video user data in a single
+ * object so that Obsidian Sync covers everything.
+ */
+export interface PluginData {
+	/** Plugin-wide settings (transcript language, etc.). */
+	settings: PluginSettings;
+	/** Per-video user data keyed by videoId. */
+	videoData: Record<string, VideoUserData>;
+}
+
+/** Plugin-wide settings stored inside PluginData. */
+export interface PluginSettings {
+	/** Preferred language code for auto-fetched transcripts (e.g. "en", "es"). */
+	transcriptLanguage: string;
+}
+
+export const DEFAULT_SETTINGS: PluginSettings = {
+	transcriptLanguage: "en",
+};
+
+export function createEmptyPluginData(): PluginData {
+	return {
+		settings: {...DEFAULT_SETTINGS},
+		videoData: {},
 	};
 }
 

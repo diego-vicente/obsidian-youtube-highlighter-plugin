@@ -1,18 +1,26 @@
 import {Plugin} from "obsidian";
-import {DEFAULT_SETTINGS, YouTubeHighlighterSettings, YouTubeHighlighterSettingTab} from "./settings";
+import type {PluginSettings} from "./types";
+import {DEFAULT_SETTINGS} from "./types";
+import {YouTubeHighlighterSettingTab} from "./settings";
 import {registerCodeBlockProcessor} from "./code-block-processor";
 import {registerInsertCommand} from "./insert-command";
 import {registerExportCommand} from "./export";
 import {VideoDataStore} from "./video-data-store";
 
 export default class YouTubeHighlighterPlugin extends Plugin {
-	settings: YouTubeHighlighterSettings;
 	dataStore: VideoDataStore;
 
-	async onload() {
-		await this.loadSettings();
+	/**
+	 * Convenience accessor for plugin-wide settings.
+	 * The canonical copy lives inside `dataStore.settings`.
+	 */
+	get settings(): PluginSettings {
+		return this.dataStore.settings;
+	}
 
+	async onload() {
 		this.dataStore = new VideoDataStore(this);
+		await this.dataStore.initialize();
 
 		registerCodeBlockProcessor(this);
 		registerInsertCommand(this);
@@ -25,15 +33,11 @@ export default class YouTubeHighlighterPlugin extends Plugin {
 		// VideoDataStore has no persistent resources to clean up.
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			await this.loadData() as Partial<YouTubeHighlighterSettings>,
-		);
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
+	/**
+	 * Persists the current settings (and all video data) to disk.
+	 * Called by the settings tab after the user changes a value.
+	 */
+	async saveSettings(): Promise<void> {
+		await this.dataStore.flush();
 	}
 }

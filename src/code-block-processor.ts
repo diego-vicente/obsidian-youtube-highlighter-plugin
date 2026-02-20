@@ -2,12 +2,15 @@ import {MarkdownPostProcessorContext, Notice} from "obsidian";
 import type YouTubeHighlighterPlugin from "./main";
 import type {VideoData, TranscriptEntry, TranscriptDisplaySettings} from "./types";
 import {CODE_BLOCK_LANGUAGE, DEFAULT_TRANSCRIPT_DISPLAY_SETTINGS, normalizeManualBreaks} from "./types";
-import {createPlayer} from "./player";
+import {createPlayer, PlayerState} from "./player";
+import type {PlayerWrapper} from "./player";
 import {fetchTranscript, parseManualTranscript} from "./transcript";
 import {createTranscriptView} from "./transcript-view";
 import {setupHighlighting} from "./highlights";
 import {createAnnotationsView} from "./annotations";
 import {TranscriptSettingsModal} from "./transcript-settings-modal";
+import type {VideoDataStore} from "./video-data-store";
+import {secondsToTimestamp} from "./utils/time";
 
 /** CSS class names used by the code block processor. */
 /** Build timestamp injected by esbuild at compile time. */
@@ -16,6 +19,7 @@ declare const BUILD_TIMESTAMP: string;
 const CSS = {
 	widget: "yt-highlighter-widget",
 	buildInfo: "yt-highlighter-build-info",
+	progressDebug: "yt-highlighter-progress-debug",
 	error: "yt-highlighter-error",
 	fetchingNotice: "yt-highlighter-fetching",
 	manualPaste: "yt-highlighter-manual-paste",
@@ -72,6 +76,10 @@ async function renderWidget(
 
 	// 1. Embed the YouTube player.
 	const player = createPlayer(widgetEl, videoId);
+
+	// 1b. Restore saved playback position and track progress.
+	const progressDebugEl = widgetEl.createDiv({cls: CSS.progressDebug});
+	setupPlaybackProgress(player, videoId, store, progressDebugEl);
 
 	// 2. Fetch or load the transcript.
 	const entries = await loadTranscript(widgetEl, videoData, plugin);
@@ -226,6 +234,104 @@ function renderManualPasteUI(
 			container.remove();
 			onParsed(entries);
 		});
+	});
+}
+
+// ─── Playback progress ───────────────────────────────────────────────
+
+/** How often (ms) the playback position is persisted while the video is playing. */
+const PROGRESS_SAVE_INTERVAL_MS = 5000;
+
+/** Minimum elapsed seconds before we bother persisting a position (avoids saving 0). */
+const PROGRESS_MIN_SECONDS = 2;
+
+/**
+ * Restores the saved playback position on load and periodically persists
+ * the current position while the video is playing. When the video reaches
+ * the ENDED state, the saved position is reset to 0 so the next open
+ * starts from the beginning.
+ *
+ * Also updates a debug display element showing the stored position.
+ */
+function setupPlaybackProgress(
+	player: PlayerWrapper,
+	videoId: string,
+	store: VideoDataStore,
+	debugEl: HTMLElement,
+): void {
+	function updateDebugDisplay(positionSeconds: number): void {
+		const timestamp = secondsToTimestamp(positionSeconds);
+		debugEl.textContent = `Saved position: ${timestamp} (${Math.round(positionSeconds)}s)`;
+	}
+
+	// ── Restore position on load ─────────────────────────────────────
+	const savedPosition = store.get(videoId).playbackPosition ?? 0;
+	updateDebugDisplay(savedPosition);
+
+	/**
+	 * True while we are restoring the saved position. During this window
+	 * any PLAYING state triggered by seekTo is suppressed with a pause,
+	 * so the video doesn't autoplay on load.
+	 */
+	let restoringPosition = savedPosition >= PROGRESS_MIN_SECONDS;
+
+	if (restoringPosition) {
+		// Wait for the player to be ready before seeking — on iOS the bridge
+		// iframe must finish loading before it can accept commands.
+		void player.ready.then(() => player.seekTo(savedPosition));
+	}
+
+	// ── Periodic save while playing ──────────────────────────────────
+	let progressInterval: number | null = null;
+
+	function saveCurrentPosition(): void {
+		void player.getCurrentTime().then((time) => {
+			const data = store.get(videoId);
+			if (time >= PROGRESS_MIN_SECONDS) {
+				data.playbackPosition = time;
+				store.requestSave(videoId);
+				updateDebugDisplay(time);
+			}
+		});
+	}
+
+	function startProgressTracking(): void {
+		if (progressInterval !== null) return;
+		progressInterval = window.setInterval(saveCurrentPosition, PROGRESS_SAVE_INTERVAL_MS);
+	}
+
+	function stopProgressTracking(): void {
+		if (progressInterval !== null) {
+			window.clearInterval(progressInterval);
+			progressInterval = null;
+		}
+	}
+
+	player.onStateChange((state) => {
+		if (state === PlayerState.PLAYING) {
+			if (restoringPosition) {
+				// The seek triggered playback — pause immediately so the
+				// video doesn't autoplay when restoring a saved position.
+				restoringPosition = false;
+				void player.pause();
+				return;
+			}
+			startProgressTracking();
+		} else if (state === PlayerState.PAUSED) {
+			stopProgressTracking();
+			// Save immediately on pause so the position isn't stale.
+			// Skip if we're still in the restore flow (the pause we just sent).
+			if (!restoringPosition) {
+				saveCurrentPosition();
+			}
+		} else if (state === PlayerState.ENDED) {
+			stopProgressTracking();
+			// Video finished — reset so next open starts from the beginning.
+			const data = store.get(videoId);
+			data.playbackPosition = 0;
+			store.requestSave(videoId);
+			updateDebugDisplay(0);
+		}
 	});
 }
 
