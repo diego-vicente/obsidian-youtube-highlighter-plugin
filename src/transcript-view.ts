@@ -47,6 +47,16 @@ export interface TranscriptView {
 	displayMode: DisplayMode;
 	/** Switch between display modes. Triggers a full re-render. Returns the new entrySpanMap. */
 	setDisplayMode(mode: DisplayMode): HTMLElement[][];
+	/**
+	 * Whether the transcript auto-scrolls to follow playback.
+	 * Starts enabled; automatically disabled when the user scrolls
+	 * the transcript during playback. Can be re-enabled via `enableAutoScroll()`.
+	 */
+	autoScroll: boolean;
+	/** Re-enables auto-scroll and immediately scrolls to the current active line. */
+	enableAutoScroll(): void;
+	/** Register a callback that fires whenever autoScroll changes. */
+	onAutoScrollChange(handler: (enabled: boolean) => void): void;
 	/** Clean up all resources. */
 	destroy(): void;
 }
@@ -355,6 +365,9 @@ export function createTranscriptView(
 			setBreakToggleHandler: (_handler: (entryIndex: number, charOffset: number) => void) => { /* noop */ },
 			displayMode: DEFAULT_DISPLAY_MODE,
 			setDisplayMode: () => [],
+			autoScroll: true,
+			enableAutoScroll: noop,
+			onAutoScrollChange: noop,
 			destroy: noop,
 		};
 	}
@@ -375,6 +388,61 @@ export function createTranscriptView(
 	let syncInterval: number | null = null;
 	let activeIndex = -1;
 
+	// ── Auto-scroll state ────────────────────────────────────────────
+
+	let autoScroll = true;
+	const autoScrollChangeHandlers: Array<(enabled: boolean) => void> = [];
+
+	function notifyAutoScrollChange(): void {
+		for (const handler of autoScrollChangeHandlers) {
+			handler(autoScroll);
+		}
+	}
+
+	/**
+	 * Set to true while the code is performing a programmatic scroll via
+	 * `scrollToElementInContainer`. This prevents the scroll event
+	 * listener from interpreting it as a user-initiated scroll.
+	 */
+	let programmaticScroll = false;
+
+	/**
+	 * Debounce timer for the scroll listener. User scrolls fire many
+	 * events rapidly; we only want to react once the scrolling settles.
+	 */
+	let scrollDebounceTimer: number | null = null;
+	const SCROLL_DEBOUNCE_MS = 150;
+
+	containerEl.addEventListener("scroll", () => {
+		if (programmaticScroll) return;
+
+		if (scrollDebounceTimer !== null) {
+			window.clearTimeout(scrollDebounceTimer);
+		}
+		scrollDebounceTimer = window.setTimeout(() => {
+			scrollDebounceTimer = null;
+			if (autoScroll) {
+				autoScroll = false;
+				notifyAutoScrollChange();
+			}
+		}, SCROLL_DEBOUNCE_MS);
+	});
+
+	function scrollToActive(): void {
+		if (activeIndex >= 0 && activeIndex < entrySpanMap.length) {
+			const firstSpan = (entrySpanMap[activeIndex] ?? [])[0];
+			if (firstSpan) {
+				programmaticScroll = true;
+				scrollToElementInContainer(containerEl, firstSpan);
+				// Clear the flag after the smooth scroll animation has time to fire events.
+				const SCROLL_ANIMATION_GRACE_MS = 400;
+				window.setTimeout(() => { programmaticScroll = false; }, SCROLL_ANIMATION_GRACE_MS);
+			}
+		}
+	}
+
+	// ── Sync ─────────────────────────────────────────────────────────
+
 	function updateActiveLineFromTime(currentTime: number): void {
 		const newIndex = findActiveEntryIndex(entries, currentTime);
 		if (newIndex === activeIndex) return;
@@ -388,19 +456,15 @@ export function createTranscriptView(
 
 		activeIndex = newIndex;
 
-		// Highlight all spans of the new active entry and scroll into view.
+		// Highlight all spans of the new active entry.
 		if (activeIndex >= 0 && activeIndex < entrySpanMap.length) {
 			const spans = entrySpanMap[activeIndex] ?? [];
 			for (const span of spans) {
 				span.addClass(CSS.segmentActive);
 			}
-			const firstSpan = spans[0];
-			if (firstSpan) {
-				// In subtitle mode, scroll the row itself; in paragraph mode, scroll the paragraph.
-				const scrollTarget = currentMode === "subtitles" ? firstSpan.parentElement : firstSpan.parentElement;
-				if (scrollTarget) {
-					scrollToElementInContainer(containerEl, scrollTarget);
-				}
+			// Only auto-scroll if the user hasn't manually scrolled away.
+			if (autoScroll) {
+				scrollToActive();
 			}
 		}
 	}
@@ -478,6 +542,15 @@ export function createTranscriptView(
 		},
 		get displayMode() { return currentMode; },
 		setDisplayMode,
+		get autoScroll() { return autoScroll; },
+		enableAutoScroll() {
+			autoScroll = true;
+			notifyAutoScrollChange();
+			scrollToActive();
+		},
+		onAutoScrollChange(handler: (enabled: boolean) => void) {
+			autoScrollChangeHandlers.push(handler);
+		},
 	};
 }
 
@@ -782,10 +855,25 @@ function findActiveEntryIndex(entries: TranscriptEntry[], currentTime: number): 
 /**
  * Scrolls the container so the target element is vertically centered,
  * without affecting the scroll position of the surrounding note.
+ *
+ * Uses `getBoundingClientRect()` for accurate positioning regardless
+ * of nesting depth (works for both inline `<span>` segments inside
+ * `<p>` paragraphs and standalone subtitle rows).
  */
 function scrollToElementInContainer(container: HTMLElement, target: HTMLElement): void {
-	const targetTop = target.offsetTop - container.offsetTop;
-	const centeredPosition = targetTop - container.clientHeight / SCROLL_CENTER_DIVISOR + target.clientHeight / SCROLL_CENTER_DIVISOR;
+	const containerRect = container.getBoundingClientRect();
+	const targetRect = target.getBoundingClientRect();
+
+	// How far the target currently is from the container's top edge,
+	// accounting for the container's current scroll position.
+	const targetOffsetInContent = targetRect.top - containerRect.top + container.scrollTop;
+
+	// Scroll so the target's vertical center aligns with the container's vertical center.
+	const centeredPosition =
+		targetOffsetInContent
+		- container.clientHeight / SCROLL_CENTER_DIVISOR
+		+ targetRect.height / SCROLL_CENTER_DIVISOR;
+
 	container.scrollTo({top: centeredPosition, behavior: "smooth"});
 }
 

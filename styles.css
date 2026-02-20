@@ -298,6 +298,30 @@
 	border-color: var(--interactive-accent);
 }
 
+/* Auto-scroll toggle button */
+.yt-highlighter-autoscroll-button {
+	cursor: pointer;
+	font-size: var(--font-ui-medium);
+	background: transparent;
+	color: var(--text-muted);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: var(--size-4-1) var(--size-4-3);
+	line-height: 1;
+	transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.yt-highlighter-autoscroll-button:hover {
+	color: var(--text-normal);
+	border-color: var(--text-muted);
+}
+
+.yt-highlighter-autoscroll-button--active {
+	background: hsla(var(--interactive-accent-hsl), 0.2);
+	color: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+}
+
 /* ─── Break mode ─────────────────────────────────────────────────── */
 
 /* Break toggle button in toolbar */

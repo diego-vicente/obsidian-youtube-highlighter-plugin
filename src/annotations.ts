@@ -20,6 +20,8 @@ const CSS = {
 	breakButtonActive: "yt-highlighter-break-button--active",
 	displayModeButton: "yt-highlighter-display-mode-button",
 	displayModeButtonActive: "yt-highlighter-display-mode-button--active",
+	autoScrollButton: "yt-highlighter-autoscroll-button",
+	autoScrollButtonActive: "yt-highlighter-autoscroll-button--active",
 	settingsButton: "yt-highlighter-settings-button",
 	input: "yt-highlighter-annotation-input",
 	toolbar: "yt-highlighter-toolbar",
@@ -91,6 +93,30 @@ export function createAnnotationsView(
 			// Hide paragraph-only buttons in subtitle mode.
 			for (const btn of paragraphModeHiddenButtons) {
 				btn.style.display = isSubtitleMode ? "none" : "";
+			}
+		});
+	}
+
+	// ── Auto-scroll toggle button ────────────────────────────────────
+
+	if (transcriptView) {
+		const autoScrollButton = toolbarEl.createEl("button", {
+			cls: `${CSS.autoScrollButton} ${CSS.autoScrollButtonActive}`,
+			// U+21E3 downwards dashed arrow ⇣
+			text: "\u21E3",
+			attr: {"aria-label": "Toggle auto-scroll"},
+		});
+
+		autoScrollButton.addEventListener("click", () => {
+			transcriptView.enableAutoScroll();
+		});
+
+		// React to auto-scroll changes (e.g. user scrolled during playback).
+		transcriptView.onAutoScrollChange((enabled) => {
+			if (enabled) {
+				autoScrollButton.addClass(CSS.autoScrollButtonActive);
+			} else {
+				autoScrollButton.removeClass(CSS.autoScrollButtonActive);
 			}
 		});
 	}
