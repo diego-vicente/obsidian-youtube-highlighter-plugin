@@ -24,6 +24,7 @@
  * Protocol (parent -> bridge):
  *   { action: "seekTo", seconds: number }
  *   { action: "getCurrentTime", requestId: string }
+ *   { action: "getDuration", requestId: string }
  *   { action: "getPlayerState", requestId: string }
  *   { action: "play" }
  *   { action: "pause" }
@@ -32,6 +33,7 @@
  *   { type: "ready" }
  *   { type: "stateChange", state: number }
  *   { type: "currentTime", requestId: string, time: number }
+ *   { type: "duration", requestId: string, duration: number }
  *   { type: "playerState", requestId: string, state: number }
  *   { type: "error", code: number }
  */
@@ -105,6 +107,14 @@ window.addEventListener("message", function(event) {
         type: "currentTime",
         requestId: data.requestId,
         time: player.getCurrentTime()
+      });
+      break;
+
+    case "getDuration":
+      sendToParent({
+        type: "duration",
+        requestId: data.requestId,
+        duration: player.getDuration()
       });
       break;
 

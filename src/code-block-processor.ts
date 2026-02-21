@@ -8,6 +8,7 @@ import {fetchTranscript, parseManualTranscript} from "./transcript";
 import {createTranscriptView} from "./transcript-view";
 import {setupHighlighting} from "./highlights";
 import {createAnnotationsView} from "./annotations";
+import {createProgressBar} from "./progress-bar";
 import {TranscriptSettingsModal} from "./transcript-settings-modal";
 import type {VideoDataStore} from "./video-data-store";
 import {secondsToTimestamp} from "./utils/time";
@@ -19,7 +20,11 @@ declare const BUILD_TIMESTAMP: string;
 const CSS = {
 	widget: "yt-highlighter-widget",
 	buildInfo: "yt-highlighter-build-info",
+	infoRow: "yt-highlighter-info-row",
 	progressDebug: "yt-highlighter-progress-debug",
+	toggleTranscript: "yt-highlighter-toggle-transcript",
+	transcriptBody: "yt-highlighter-transcript-body",
+	transcriptBodyHidden: "yt-highlighter-transcript-body--hidden",
 	error: "yt-highlighter-error",
 	fetchingNotice: "yt-highlighter-fetching",
 	manualPaste: "yt-highlighter-manual-paste",
@@ -78,11 +83,45 @@ async function renderWidget(
 	const player = createPlayer(widgetEl, videoId);
 
 	// 1b. Restore saved playback position and track progress.
-	const progressDebugEl = widgetEl.createDiv({cls: CSS.progressDebug});
+	const infoRowEl = widgetEl.createDiv({cls: CSS.infoRow});
+	const progressDebugEl = infoRowEl.createDiv({cls: CSS.progressDebug});
 	setupPlaybackProgress(player, videoId, store, progressDebugEl);
 
+	// 1c. Progress bar (slim timeline below the player).
+	// Use a late-bound reference so the progress bar can notify the
+	// "Go to" button (created later in the annotations toolbar).
+	let onFurthestWatchedChange: (() => void) | undefined;
+	const progressBar = createProgressBar(
+		widgetEl, player, videoId, store,
+		() => onFurthestWatchedChange?.(),
+	);
+
+	// Wrapper for transcript + toolbar + annotations so the toggle can
+	// hide/show them as a group while keeping the progress bar visible.
+	const transcriptBodyEl = widgetEl.createDiv({cls: CSS.transcriptBody});
+
+	// Toggle button in the info row — hides/shows the transcript body.
+	const ICON_SHOW = "\u25BC"; // ▼
+	const ICON_HIDE = "\u25B2"; // ▲
+	const toggleButton = infoRowEl.createEl("button", {
+		cls: CSS.toggleTranscript,
+		text: ICON_HIDE,
+		attr: {"aria-label": "Toggle transcript"},
+	});
+
+	toggleButton.addEventListener("click", () => {
+		const isHidden = transcriptBodyEl.hasClass(CSS.transcriptBodyHidden);
+		if (isHidden) {
+			transcriptBodyEl.removeClass(CSS.transcriptBodyHidden);
+			toggleButton.textContent = ICON_HIDE;
+		} else {
+			transcriptBodyEl.addClass(CSS.transcriptBodyHidden);
+			toggleButton.textContent = ICON_SHOW;
+		}
+	});
+
 	// 2. Fetch or load the transcript.
-	const entries = await loadTranscript(widgetEl, videoData, plugin);
+	const entries = await loadTranscript(transcriptBodyEl, videoData, plugin);
 
 	// 3. Render the synced transcript view.
 	if (entries && entries.length > 0) {
@@ -91,12 +130,14 @@ async function renderWidget(
 		const manualBreaks = normalizeManualBreaks(userData.manualBreaks);
 
 		const transcriptView = createTranscriptView(
-			widgetEl, entries, player, currentSettings, manualBreaks,
+			transcriptBodyEl, entries, player, currentSettings, manualBreaks,
 		);
 
 		// 4. Set up highlighting (text selection → highlight creation).
+		const onHighlightChange = (): void => progressBar.updateMarkers();
 		let highlightHandle = setupHighlighting(
 			transcriptView.containerEl, transcriptView.entrySpanMap, entries, videoId, store,
+			onHighlightChange,
 		);
 
 		/** Re-renders transcript and re-applies highlights with current data. */
@@ -110,6 +151,7 @@ async function renderWidget(
 
 			highlightHandle = setupHighlighting(
 				transcriptView.containerEl, newEntrySpanMap, entries, videoId, store,
+				onHighlightChange,
 			);
 		};
 
@@ -153,15 +195,21 @@ async function renderWidget(
 			if (newMode === "paragraphs") {
 				highlightHandle = setupHighlighting(
 					transcriptView.containerEl, newEntrySpanMap, entries, videoId, store,
+					onHighlightChange,
 				);
 			}
 		};
 
-		createAnnotationsView(
-			widgetEl, videoId, store, player,
+		const onAnnotationChange = (): void => progressBar.updateMarkers();
+		const annotationsHandle = createAnnotationsView(
+			transcriptBodyEl, videoId, store, player,
 			highlightHandle, onSettingsButtonClick, transcriptView, onBreakToggle,
-			onDisplayModeToggle,
+			onDisplayModeToggle, onAnnotationChange,
 		);
+
+		// Now that the annotations toolbar exists, wire up the late-bound
+		// callback so the progress bar tick updates the "Go to" button label.
+		onFurthestWatchedChange = () => annotationsHandle.updateFurthestButton();
 	}
 
 	// Build info for debugging sync issues.
@@ -303,6 +351,11 @@ function setupPlaybackProgress(
 			const data = store.get(videoId);
 			if (time >= PROGRESS_MIN_SECONDS) {
 				data.playbackPosition = time;
+				// Track the high-water mark for the progress bar.
+				const previousFurthest = data.furthestWatched ?? 0;
+				if (time > previousFurthest) {
+					data.furthestWatched = time;
+				}
 				store.requestSave(videoId);
 				updateDebugDisplay(time);
 			}
@@ -401,15 +454,43 @@ async function loadCachedTranscript(
 
 // ─── Parsing helpers ─────────────────────────────────────────────────
 
+/** Replace smart/curly quotes with their ASCII equivalents. */
+function sanitizeSmartQuotes(raw: string): string {
+	return raw
+		.replace(/[\u201C\u201D]/g, '"')  // " " → "
+		.replace(/[\u2018\u2019]/g, "'"); // ' ' → '
+}
+
+/**
+ * Fallback parser for when JSON.parse fails (e.g. unescaped quotes in
+ * the title value).  Extracts videoId and title via regex from the
+ * known `{"videoId": "...", "title": "..."}` shape.
+ */
+function parseVideoDataFallback(source: string): VideoData | null {
+	const videoIdMatch = source.match(/"videoId"\s*:\s*"([^"]+)"/);
+	const videoId = videoIdMatch?.[1];
+	if (!videoId) return null;
+
+	// Title is trickier — grab everything between the last pair of
+	// quotes that follows `"title":`.  The value may contain unescaped
+	// quotes, so we match from after `"title": "` to the final `"}`.
+	const titleMatch = source.match(/"title"\s*:\s*"([\s\S]+)"\s*\}$/);
+	const title = titleMatch?.[1] ?? "";
+
+	return { videoId, title };
+}
+
 function parseVideoData(source: string): VideoData | null {
+	const sanitized = sanitizeSmartQuotes(source);
 	try {
-		const parsed: unknown = JSON.parse(source);
+		const parsed: unknown = JSON.parse(sanitized);
 		if (!isVideoData(parsed)) {
 			return null;
 		}
 		return parsed;
 	} catch {
-		return null;
+		// JSON is malformed — attempt regex extraction
+		return parseVideoDataFallback(sanitized);
 	}
 }
 

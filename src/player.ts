@@ -53,6 +53,8 @@ export interface PlayerWrapper {
 	ready: Promise<void>;
 	/** Get current playback time in seconds. */
 	getCurrentTime(): Promise<number>;
+	/** Get total video duration in seconds. Returns 0 if unknown. */
+	getDuration(): Promise<number>;
 	/** Get the current player state. */
 	getPlayerState(): Promise<number>;
 	/** Seek to a position in seconds. */
@@ -104,6 +106,10 @@ function createDirectPlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 			return instance.getCurrentTime();
 		},
 
+		async getDuration() {
+			return instance.getDuration();
+		},
+
 		async getPlayerState() {
 			return instance.getPlayerState();
 		},
@@ -139,6 +145,7 @@ function createDirectPlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
  * Protocol (plugin -> bridge):
  *   { action: "seekTo", seconds }
  *   { action: "getCurrentTime", requestId }
+ *   { action: "getDuration", requestId }
  *   { action: "getPlayerState", requestId }
  *   { action: "play" }
  *   { action: "pause" }
@@ -147,6 +154,7 @@ function createDirectPlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
  *   { type: "ready" }
  *   { type: "stateChange", state }
  *   { type: "currentTime", requestId, time }
+ *   { type: "duration", requestId, duration }
  *   { type: "playerState", requestId, state }
  *   { type: "error", code }
  */
@@ -182,6 +190,7 @@ function createBridgePlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 		type: string;
 		state?: number;
 		time?: number;
+		duration?: number;
 		requestId?: string;
 		code?: number;
 	}
@@ -216,6 +225,17 @@ function createBridgePlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 					if (resolver) {
 						pendingRequests.delete(data.requestId);
 						resolver(data.time);
+					}
+				}
+				break;
+			}
+
+			case "duration": {
+				if (data.requestId !== undefined && data.duration !== undefined) {
+					const resolver = pendingRequests.get(data.requestId);
+					if (resolver) {
+						pendingRequests.delete(data.requestId);
+						resolver(data.duration);
 					}
 				}
 				break;
@@ -271,6 +291,15 @@ function createBridgePlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 
 		async getCurrentTime() {
 			return sendRequest("getCurrentTime");
+		},
+
+		async getDuration() {
+			try {
+				return await sendRequest("getDuration");
+			} catch {
+				// If the bridge isn't ready yet, report as unknown.
+				return 0;
+			}
 		},
 
 		async getPlayerState() {

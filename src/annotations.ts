@@ -14,6 +14,7 @@ const CSS = {
 	text: "yt-highlighter-annotation-text",
 	deleteButton: "yt-highlighter-annotation-delete",
 	addButton: "yt-highlighter-annotation-add",
+	goToFurthestButton: "yt-highlighter-goto-furthest",
 	highlightButton: "yt-highlighter-highlight-button",
 	highlightButtonActive: "yt-highlighter-highlight-button--active",
 	breakButton: "yt-highlighter-break-button",
@@ -29,6 +30,12 @@ const CSS = {
 
 /** Prefix for generating unique annotation IDs. */
 const ANNOTATION_ID_PREFIX = "a";
+
+/** Handle returned by createAnnotationsView for external updates. */
+export interface AnnotationsViewHandle {
+	/** Update the "Go to" button label with the current furthest-watched time. */
+	updateFurthestButton(): void;
+}
 
 /**
  * Renders the annotations panel and toolbar below the transcript.
@@ -48,7 +55,8 @@ export function createAnnotationsView(
 	transcriptView?: TranscriptView,
 	onBreakToggle?: (entryIndex: number, charOffset: number) => void,
 	onDisplayModeToggle?: () => void,
-): void {
+	onAnnotationChange?: () => void,
+): AnnotationsViewHandle {
 	const toolbarEl = parentEl.createDiv({cls: CSS.toolbar});
 	const annotationsEl = parentEl.createDiv({cls: CSS.container});
 
@@ -160,9 +168,55 @@ export function createAnnotationsView(
 			const annotation = createAnnotation(currentTime);
 			store.get(videoId).annotations.push(annotation);
 			store.requestSave(videoId);
-			renderAnnotations(annotationsEl, videoId, store, player);
+			renderAnnotations(annotationsEl, videoId, store, player, onAnnotationChange);
+			onAnnotationChange?.();
 		});
 	});
+
+	// ── "Go to furthest" button ─────────────────────────────────────
+
+	/**
+	 * If the player is within this many seconds of the furthest-watched
+	 * point, the button is hidden (the user is already "there").
+	 */
+	const NEAR_FURTHEST_THRESHOLD_SECONDS = 3;
+
+	const goToFurthestButton = toolbarEl.createEl("button", {
+		cls: CSS.goToFurthestButton,
+		text: "",
+		attr: {"aria-label": "Seek to furthest watched position"},
+	});
+	// Hidden by default until we know there's a meaningful furthest point.
+	goToFurthestButton.style.display = "none";
+
+	goToFurthestButton.addEventListener("click", () => {
+		const furthest = store.get(videoId).furthestWatched ?? 0;
+		if (furthest > 0) {
+			void player.seekTo(furthest);
+		}
+	});
+
+	/**
+	 * Updates the button label and visibility. Called on every progress
+	 * bar tick so the button hides when the player reaches the furthest
+	 * point and reappears when the user seeks away.
+	 */
+	function updateFurthestButton(): void {
+		const furthest = store.get(videoId).furthestWatched ?? 0;
+		if (furthest <= 0) {
+			goToFurthestButton.style.display = "none";
+			return;
+		}
+
+		void player.getCurrentTime().then((currentTime) => {
+			const nearFurthest = Math.abs(currentTime - furthest) < NEAR_FURTHEST_THRESHOLD_SECONDS;
+			goToFurthestButton.style.display = nearFurthest ? "none" : "";
+			goToFurthestButton.textContent = `Go to ${secondsToTimestamp(furthest)}`;
+		});
+	}
+
+	// Run once on load to set initial state.
+	updateFurthestButton();
 
 	// ── Break mode toggle button ─────────────────────────────────────
 
@@ -208,7 +262,9 @@ export function createAnnotationsView(
 	}
 
 	// Render existing annotations.
-	renderAnnotations(annotationsEl, videoId, store, player);
+	renderAnnotations(annotationsEl, videoId, store, player, onAnnotationChange);
+
+	return {updateFurthestButton};
 }
 
 /** Renders all annotations sorted by timestamp. */
@@ -217,6 +273,7 @@ function renderAnnotations(
 	videoId: string,
 	store: VideoDataStore,
 	player: PlayerWrapper,
+	onAnnotationChange?: () => void,
 ): void {
 	containerEl.empty();
 
@@ -227,7 +284,7 @@ function renderAnnotations(
 	const sorted = [...annotations].sort((a, b) => a.timestamp - b.timestamp);
 
 	for (const annotation of sorted) {
-		renderAnnotationItem(containerEl, annotation, videoId, store, player);
+		renderAnnotationItem(containerEl, annotation, videoId, store, player, onAnnotationChange);
 	}
 }
 
@@ -238,6 +295,7 @@ function renderAnnotationItem(
 	videoId: string,
 	store: VideoDataStore,
 	player: PlayerWrapper,
+	onAnnotationChange?: () => void,
 ): void {
 	const itemEl = containerEl.createDiv({cls: CSS.item});
 
@@ -279,7 +337,8 @@ function renderAnnotationItem(
 		if (index !== -1) {
 			data.annotations.splice(index, 1);
 			store.requestSave(videoId);
-			renderAnnotations(containerEl.parentElement ?? containerEl, videoId, store, player);
+			renderAnnotations(containerEl.parentElement ?? containerEl, videoId, store, player, onAnnotationChange);
+			onAnnotationChange?.();
 		}
 	});
 }

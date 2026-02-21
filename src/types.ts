@@ -121,6 +121,12 @@ export interface VideoUserData {
 	 * to completion (ENDED state), this is reset to 0 on next load.
 	 */
 	playbackPosition?: number;
+	/**
+	 * The furthest point (in seconds) the user has watched to. Unlike
+	 * `playbackPosition`, this is never reset — it always tracks the
+	 * high-water mark so the progress bar can show how much has been seen.
+	 */
+	furthestWatched?: number;
 }
 
 /**

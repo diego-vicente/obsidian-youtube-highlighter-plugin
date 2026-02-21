@@ -50,6 +50,7 @@ export function setupHighlighting(
 	entries: TranscriptEntry[],
 	videoId: string,
 	store: VideoDataStore,
+	onChange?: () => void,
 ): HighlightHandle {
 	// Apply existing highlights from the data store on load.
 	restoreHighlights(entrySpanMap, entries, videoId, store);
@@ -81,14 +82,16 @@ export function setupHighlighting(
 
 			// Collapsed selection = click. Check if it's on a highlight to remove it.
 			if (!selection || selection.isCollapsed) {
-				handleHighlightClick(event.target as Node, containerEl, videoId, store);
+				const removed = handleHighlightClick(event.target as Node, containerEl, videoId, store);
+				if (removed) onChange?.();
 				return;
 			}
 
 			const range = selection.getRangeAt(0);
 			if (!containerEl.contains(range.commonAncestorContainer)) return;
 
-			applyHighlightFromRange(range, entrySpanMap, entries, videoId, store);
+			const created = applyHighlightFromRange(range, entrySpanMap, entries, videoId, store);
+			if (created) onChange?.();
 			selection.removeAllRanges();
 		});
 	}
@@ -122,7 +125,8 @@ export function setupHighlighting(
 			// Only handle taps, not selections.
 			if (selection && !selection.isCollapsed) return;
 
-			handleHighlightClick(event.target as Node, containerEl, videoId, store);
+			const removed = handleHighlightClick(event.target as Node, containerEl, videoId, store);
+			if (removed) onChange?.();
 		});
 	}
 
@@ -137,6 +141,7 @@ export function setupHighlighting(
 			// Clear the stash and any remaining browser selection.
 			setStashedRange(null);
 			window.getSelection()?.removeAllRanges();
+			if (created) onChange?.();
 			return created;
 		},
 
@@ -195,20 +200,23 @@ function applyHighlightFromRange(
 
 /**
  * Handles a click/tap on an existing highlight — removes it.
+ * Returns true if a highlight was removed.
  */
 function handleHighlightClick(
 	target: Node,
 	containerEl: HTMLElement,
 	videoId: string,
 	store: VideoDataStore,
-): void {
+): boolean {
 	const highlightEl = findParentHighlight(target);
 	if (highlightEl) {
 		const highlightId = highlightEl.dataset[DATA_HIGHLIGHT_ID];
 		if (highlightId) {
 			removeHighlight(highlightId, containerEl, videoId, store);
+			return true;
 		}
 	}
+	return false;
 }
 
 // ─── DOM range → entry mapping ───────────────────────────────────────

@@ -135,13 +135,36 @@ function findAllCodeBlocks(editor: Editor): CodeBlockLocation[] {
  * Parses VideoData from the raw JSON content of a code block.
  */
 function parseVideoDataFromBlock(content: string): VideoData | null {
+	const sanitized = sanitizeSmartQuotes(content);
 	try {
-		const parsed = JSON.parse(content) as VideoData;
+		const parsed = JSON.parse(sanitized) as VideoData;
 		if (typeof parsed.videoId !== "string") return null;
 		return parsed;
 	} catch {
-		return null;
+		return parseVideoDataFallback(sanitized);
 	}
+}
+
+/** Replace smart/curly quotes with their ASCII equivalents. */
+function sanitizeSmartQuotes(raw: string): string {
+	return raw
+		.replace(/[\u201C\u201D]/g, '"')
+		.replace(/[\u2018\u2019]/g, "'");
+}
+
+/**
+ * Fallback parser for when JSON.parse fails (e.g. unescaped quotes in
+ * the title value).  Extracts videoId and title via regex.
+ */
+function parseVideoDataFallback(source: string): VideoData | null {
+	const videoIdMatch = source.match(/"videoId"\s*:\s*"([^"]+)"/);
+	const videoId = videoIdMatch?.[1];
+	if (!videoId) return null;
+
+	const titleMatch = source.match(/"title"\s*:\s*"([\s\S]+)"\s*\}$/);
+	const title = titleMatch?.[1] ?? "";
+
+	return { videoId, title };
 }
 
 // ─── Markdown conversion ─────────────────────────────────────────────
