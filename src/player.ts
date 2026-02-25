@@ -61,6 +61,10 @@ export interface PlayerWrapper {
 	seekTo(seconds: number): Promise<void>;
 	/** Pause playback. */
 	pause(): Promise<void>;
+	/** Mute the player audio. */
+	mute(): Promise<void>;
+	/** Unmute the player audio. */
+	unMute(): Promise<void>;
 	/** Destroy the player and clean up. */
 	destroy(): Promise<void>;
 	/** Register a callback for player state changes. */
@@ -121,6 +125,14 @@ function createDirectPlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 
 		async pause() {
 			await instance.pauseVideo();
+		},
+
+		async mute() {
+			await instance.mute();
+		},
+
+		async unMute() {
+			await instance.unMute();
 		},
 
 		async destroy() {
@@ -317,6 +329,14 @@ function createBridgePlayer(parentEl: HTMLElement, videoId: string): PlayerWrapp
 
 		async pause() {
 			sendCommand({action: "pause"});
+		},
+
+		async mute() {
+			sendCommand({action: "mute"});
+		},
+
+		async unMute() {
+			sendCommand({action: "unMute"});
 		},
 
 		async destroy() {

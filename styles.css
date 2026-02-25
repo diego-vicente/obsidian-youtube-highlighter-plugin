@@ -501,13 +501,95 @@
 	display: none;
 }
 
-/* ─── Debug info ─────────────────────────────────────────────────── */
+/* ─── Debug panel (collapsible sync log + data snapshot) ─────────── */
 
-.yt-highlighter-build-info {
-	padding: var(--size-4-1) var(--size-4-4);
+.yt-highlighter-debug-panel {
+	border-top: 1px solid var(--background-modifier-border);
 	font-size: var(--font-smallest);
 	color: var(--text-faint);
-	text-align: right;
+}
+
+.yt-highlighter-debug-toggle {
+	display: block;
+	width: 100%;
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	padding: var(--size-4-1) var(--size-4-4);
+	font-size: var(--font-smallest);
+	font-family: var(--font-monospace);
+	color: var(--text-faint);
+	text-align: left;
+	transition: color 150ms ease;
+}
+
+.yt-highlighter-debug-toggle:hover {
+	color: var(--text-muted);
+}
+
+.yt-highlighter-debug-body {
+	padding: 0 var(--size-4-4) var(--size-4-2);
+}
+
+.yt-highlighter-debug-body strong {
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	margin-bottom: var(--size-4-1);
+}
+
+.yt-highlighter-debug-snapshot {
+	padding: var(--size-4-2);
+	margin: var(--size-4-1) 0 var(--size-4-2) 0;
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	font-size: var(--font-smallest);
+	font-family: var(--font-monospace);
+	overflow-x: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 150px;
+	overflow-y: auto;
+}
+
+.yt-highlighter-debug-log-list {
+	max-height: 250px;
+	overflow-y: auto;
+	margin: var(--size-4-1) 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+}
+
+.yt-highlighter-debug-log-entry {
+	display: flex;
+	gap: var(--size-4-2);
+	padding: var(--size-2-1) var(--size-4-2);
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-family: var(--font-monospace);
+	font-size: var(--font-smallest);
+	line-height: 1.4;
+}
+
+.yt-highlighter-debug-log-entry:last-child {
+	border-bottom: none;
+}
+
+.yt-highlighter-debug-log-time {
+	color: var(--text-faint);
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
+.yt-highlighter-debug-log-type {
+	color: var(--text-accent);
+	white-space: nowrap;
+	flex-shrink: 0;
+	min-width: 10em;
+}
+
+.yt-highlighter-debug-log-msg {
+	color: var(--text-muted);
+	word-break: break-word;
 }
 
 /* ─── Annotations panel ──────────────────────────────────────────── */

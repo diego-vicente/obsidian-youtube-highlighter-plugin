@@ -28,6 +28,8 @@
  *   { action: "getPlayerState", requestId: string }
  *   { action: "play" }
  *   { action: "pause" }
+ *   { action: "mute" }
+ *   { action: "unMute" }
  *
  * Protocol (bridge -> parent):
  *   { type: "ready" }
@@ -132,6 +134,14 @@ window.addEventListener("message", function(event) {
 
     case "pause":
       player.pauseVideo();
+      break;
+
+    case "mute":
+      player.mute();
+      break;
+
+    case "unMute":
+      player.unMute();
       break;
   }
 });

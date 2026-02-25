@@ -30,7 +30,21 @@ export default class YouTubeHighlighterPlugin extends Plugin {
 	}
 
 	onunload() {
-		// VideoDataStore has no persistent resources to clean up.
+		// Ensure any pending debounced writes are flushed before the
+		// plugin is disabled or Obsidian is closed. Without this, data
+		// mutated in the last SAVE_DEBOUNCE_MS window would be lost.
+		this.dataStore.flushPending();
+	}
+
+	/**
+	 * Called by Obsidian when `data.json` is modified externally — e.g.
+	 * by Obsidian Sync, iCloud, or another sync service. Re-reads the
+	 * file and merges incoming changes with any unsaved local edits.
+	 *
+	 * @see https://docs.obsidian.md/Reference/TypeScript+API/Plugin/onExternalSettingsChange
+	 */
+	async onExternalSettingsChange(): Promise<void> {
+		await this.dataStore.reloadFromDisk();
 	}
 
 	/**

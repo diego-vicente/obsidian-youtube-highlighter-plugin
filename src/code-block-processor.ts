@@ -10,7 +10,7 @@ import {setupHighlighting} from "./highlights";
 import {createAnnotationsView} from "./annotations";
 import {createProgressBar} from "./progress-bar";
 import {TranscriptSettingsModal} from "./transcript-settings-modal";
-import type {VideoDataStore} from "./video-data-store";
+import type {VideoDataStore, SyncLogEntry} from "./video-data-store";
 import {secondsToTimestamp} from "./utils/time";
 
 /** CSS class names used by the code block processor. */
@@ -30,6 +30,15 @@ const CSS = {
 	manualPaste: "yt-highlighter-manual-paste",
 	manualTextarea: "yt-highlighter-manual-textarea",
 	manualButton: "yt-highlighter-manual-button",
+	debugPanel: "yt-highlighter-debug-panel",
+	debugToggle: "yt-highlighter-debug-toggle",
+	debugBody: "yt-highlighter-debug-body",
+	debugLogList: "yt-highlighter-debug-log-list",
+	debugLogEntry: "yt-highlighter-debug-log-entry",
+	debugLogTime: "yt-highlighter-debug-log-time",
+	debugLogType: "yt-highlighter-debug-log-type",
+	debugLogMsg: "yt-highlighter-debug-log-msg",
+	debugSnapshot: "yt-highlighter-debug-snapshot",
 } as const;
 
 /**
@@ -212,8 +221,8 @@ async function renderWidget(
 		onFurthestWatchedChange = () => annotationsHandle.updateFurthestButton();
 	}
 
-	// Build info for debugging sync issues.
-	widgetEl.createDiv({cls: CSS.buildInfo, text: `Build: ${BUILD_TIMESTAMP}`});
+	// Debug panel — collapsible sync log and data snapshot.
+	createDebugPanel(widgetEl, videoId, store);
 }
 
 /**
@@ -338,9 +347,13 @@ function setupPlaybackProgress(
 	let restoringPosition = savedPosition >= PROGRESS_MIN_SECONDS;
 
 	if (restoringPosition) {
+		// Mute before seeking so the brief play→pause transition is silent.
 		// Wait for the player to be ready before seeking — on iOS the bridge
 		// iframe must finish loading before it can accept commands.
-		void player.ready.then(() => player.seekTo(savedPosition));
+		void player.ready.then(async () => {
+			await player.mute();
+			await player.seekTo(savedPosition);
+		});
 	}
 
 	// ── Periodic save while playing ──────────────────────────────────
@@ -379,8 +392,9 @@ function setupPlaybackProgress(
 			if (restoringPosition) {
 				// The seek triggered playback — pause immediately so the
 				// video doesn't autoplay when restoring a saved position.
+				// Then unmute so normal playback has sound.
 				restoringPosition = false;
-				void player.pause();
+				void player.pause().then(() => player.unMute());
 				return;
 			}
 			startProgressTracking();
@@ -400,6 +414,123 @@ function setupPlaybackProgress(
 			updateDebugDisplay(0);
 		}
 	});
+}
+
+// ─── Debug panel ─────────────────────────────────────────────────────
+
+/** Time format for the sync log: "HH:MM:SS". */
+function formatLogTime(date: Date): string {
+	return date.toLocaleTimeString("en-GB", {hour12: false});
+}
+
+/**
+ * Creates a collapsible debug panel at the bottom of the widget.
+ * Shows the build timestamp, a live sync event log, and a snapshot
+ * of the current in-memory data for this video.
+ *
+ * The panel subscribes to `store.onSyncLogUpdate()` so new entries
+ * appear in real-time without manual refresh.
+ */
+function createDebugPanel(
+	parentEl: HTMLElement,
+	videoId: string,
+	store: VideoDataStore,
+): void {
+	const panelEl = parentEl.createDiv({cls: CSS.debugPanel});
+
+	// ── Toggle header ────────────────────────────────────────────
+	const LABEL_COLLAPSED = `\u25B6 Debug (Build: ${BUILD_TIMESTAMP})`;  // ▶
+	const LABEL_EXPANDED  = `\u25BC Debug (Build: ${BUILD_TIMESTAMP})`;  // ▼
+	const toggleEl = panelEl.createEl("button", {
+		cls: CSS.debugToggle,
+		text: LABEL_COLLAPSED,
+	});
+
+	// ── Body (hidden by default) ─────────────────────────────────
+	const bodyEl = panelEl.createDiv({cls: CSS.debugBody});
+	bodyEl.style.display = "none";
+
+	toggleEl.addEventListener("click", () => {
+		const isHidden = bodyEl.style.display === "none";
+		bodyEl.style.display = isHidden ? "block" : "none";
+		toggleEl.textContent = isHidden ? LABEL_EXPANDED : LABEL_COLLAPSED;
+		if (isHidden) {
+			renderSnapshot();
+			renderLog();
+		}
+	});
+
+	// ── Data snapshot section ────────────────────────────────────
+	const snapshotHeader = bodyEl.createEl("strong", {text: "Data snapshot"});
+	snapshotHeader.style.display = "block";
+	snapshotHeader.style.marginTop = "4px";
+	const snapshotEl = bodyEl.createEl("pre", {cls: CSS.debugSnapshot});
+
+	function renderSnapshot(): void {
+		const data = store.get(videoId);
+		const snapshot = {
+			videoId,
+			playbackPosition: data.playbackPosition ?? 0,
+			furthestWatched: data.furthestWatched ?? 0,
+			highlights: data.highlights.length,
+			annotations: data.annotations.length,
+			hasTranscriptSettings: !!data.transcriptSettings,
+			manualBreaks: Array.isArray(data.manualBreaks) ? data.manualBreaks.length : 0,
+		};
+		snapshotEl.textContent = JSON.stringify(snapshot, null, 2);
+	}
+
+	// ── Sync log section ────────────────────────────────────────
+	bodyEl.createEl("strong", {text: "Sync log"}).style.display = "block";
+	const logListEl = bodyEl.createDiv({cls: CSS.debugLogList});
+
+	function renderLogEntry(entry: SyncLogEntry): HTMLElement {
+		const row = createDiv({cls: CSS.debugLogEntry});
+		row.createSpan({cls: CSS.debugLogTime, text: formatLogTime(entry.timestamp)});
+		row.createSpan({cls: CSS.debugLogType, text: entry.type});
+
+		const msgText = entry.videoId
+			? `[${entry.videoId}] ${entry.message}`
+			: entry.message;
+		row.createSpan({cls: CSS.debugLogMsg, text: msgText});
+
+		return row;
+	}
+
+	function renderLog(): void {
+		logListEl.empty();
+		for (const entry of store.syncLog) {
+			logListEl.appendChild(renderLogEntry(entry));
+		}
+		// Auto-scroll to the bottom.
+		logListEl.scrollTop = logListEl.scrollHeight;
+	}
+
+	// Live updates — when the panel is open, new entries appear automatically.
+	const onLogUpdate = (): void => {
+		if (bodyEl.style.display === "none") return;
+		renderLog();
+		renderSnapshot();
+	};
+
+	store.onSyncLogUpdate(onLogUpdate);
+
+	// Clean up the listener when the widget is removed from the DOM.
+	// MutationObserver on the parent watches for removal.
+	const observer = new MutationObserver((mutations) => {
+		for (const mutation of mutations) {
+			for (const removed of Array.from(mutation.removedNodes)) {
+				if (removed === panelEl || removed.contains(panelEl)) {
+					store.offSyncLogUpdate(onLogUpdate);
+					observer.disconnect();
+					return;
+				}
+			}
+		}
+	});
+	if (parentEl.parentElement) {
+		observer.observe(parentEl.parentElement, {childList: true, subtree: true});
+	}
 }
 
 // ─── Transcript caching ──────────────────────────────────────────────
