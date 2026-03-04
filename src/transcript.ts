@@ -19,11 +19,15 @@ const INNERTUBE_API_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
  * Client context for the Innertube API.
  * The ANDROID client returns caption track URLs that work for all videos,
  * including multi-audio videos where the WEB client's URLs return empty.
+ *
+ * NOTE: YouTube periodically tightens precondition checks on older client
+ * versions, causing 400 FAILED_PRECONDITION errors. When that happens,
+ * bump clientVersion and androidSdkVersion to a recent stable release.
  */
 const INNERTUBE_CLIENT_CONTEXT = {
 	clientName: "ANDROID",
-	clientVersion: "19.09.37",
-	androidSdkVersion: 30,
+	clientVersion: "20.01.38",
+	androidSdkVersion: 35,
 } as const;
 
 /**
