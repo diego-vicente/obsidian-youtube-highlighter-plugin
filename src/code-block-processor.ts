@@ -12,6 +12,7 @@ import {createProgressBar} from "./progress-bar";
 import {TranscriptSettingsModal} from "./transcript-settings-modal";
 import type {VideoDataStore, SyncLogEntry} from "./video-data-store";
 import {secondsToTimestamp} from "./utils/time";
+import {markPublishDirty} from "./publish-sync";
 
 /** CSS class names used by the code block processor. */
 /** Build timestamp injected by esbuild at compile time. */
@@ -132,6 +133,12 @@ async function renderWidget(
 	// 2. Fetch or load the transcript.
 	const entries = await loadTranscript(transcriptBodyEl, videoData, plugin);
 
+	// Mark the file as needing its publish data refreshed when the note
+	// is closed. We always mark on render since highlights/annotations
+	// may have changed externally (e.g., via sync).
+	const filePath = ctx.sourcePath;
+	markPublishDirty(filePath, videoId);
+
 	// 3. Render the synced transcript view.
 	if (entries && entries.length > 0) {
 		const userData = store.get(videoId);
@@ -143,7 +150,10 @@ async function renderWidget(
 		);
 
 		// 4. Set up highlighting (text selection → highlight creation).
-		const onHighlightChange = (): void => progressBar.updateMarkers();
+		const onHighlightChange = (): void => {
+			progressBar.updateMarkers();
+			markPublishDirty(filePath, videoId);
+		};
 		let highlightHandle = setupHighlighting(
 			transcriptView.containerEl, transcriptView.entrySpanMap, entries, videoId, store,
 			onHighlightChange,
@@ -170,6 +180,7 @@ async function renderWidget(
 			new TranscriptSettingsModal(plugin.app, latestSettings, (newSettings: TranscriptDisplaySettings) => {
 				store.get(videoId).transcriptSettings = newSettings;
 				store.requestSave(videoId);
+				markPublishDirty(filePath, videoId);
 				rerenderTranscript();
 			}).open();
 		};
@@ -192,6 +203,7 @@ async function renderWidget(
 
 			data.manualBreaks = breaks;
 			store.requestSave(videoId);
+			markPublishDirty(filePath, videoId);
 			rerenderTranscript();
 		};
 
@@ -209,7 +221,10 @@ async function renderWidget(
 			}
 		};
 
-		const onAnnotationChange = (): void => progressBar.updateMarkers();
+		const onAnnotationChange = (): void => {
+			progressBar.updateMarkers();
+			markPublishDirty(filePath, videoId);
+		};
 		const annotationsHandle = createAnnotationsView(
 			transcriptBodyEl, videoId, store, player,
 			highlightHandle, onSettingsButtonClick, transcriptView, onBreakToggle,

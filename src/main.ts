@@ -5,6 +5,7 @@ import {YouTubeHighlighterSettingTab} from "./settings";
 import {registerCodeBlockProcessor} from "./code-block-processor";
 import {registerInsertCommand} from "./insert-command";
 import {registerExportCommand} from "./export";
+import {registerPublishSync, flushAllPublishData} from "./publish-sync";
 import {VideoDataStore} from "./video-data-store";
 
 export default class YouTubeHighlighterPlugin extends Plugin {
@@ -25,11 +26,16 @@ export default class YouTubeHighlighterPlugin extends Plugin {
 		registerCodeBlockProcessor(this);
 		registerInsertCommand(this);
 		registerExportCommand(this);
+		registerPublishSync(this);
 
 		this.addSettingTab(new YouTubeHighlighterSettingTab(this.app, this));
 	}
 
 	onunload() {
+		// Flush any pending publish data into code blocks before the
+		// plugin is disabled or Obsidian is closed.
+		void flushAllPublishData(this);
+
 		// Ensure any pending debounced writes are flushed before the
 		// plugin is disabled or Obsidian is closed. Without this, data
 		// mutated in the last SAVE_DEBOUNCE_MS window would be lost.
