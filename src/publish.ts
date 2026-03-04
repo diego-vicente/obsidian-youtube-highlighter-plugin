@@ -19,6 +19,8 @@
 interface Highlight {
 	id: string;
 	text: string;
+	/** User-edited display text override, one string per entry (supports inline markdown). */
+	displayText?: string[];
 	startTime: number;
 	endTime: number;
 }
@@ -332,6 +334,68 @@ function renderPublishWidget(source: string, el: HTMLElement): void {
 	});
 }
 
+// ─── Inline markdown rendering ───────────────────────────────────────
+
+/**
+ * Inline regex for Obsidian-flavored markdown (wikilinks, bold, italic).
+ * Groups: 1 = wiki target, 2 = wiki display, 3 = bold, 4 = italic.
+ */
+const PUB_GROUP_WIKI_TARGET = 1;
+const PUB_GROUP_WIKI_DISPLAY = 2;
+const PUB_GROUP_BOLD = 3;
+const PUB_GROUP_ITALIC = 4;
+
+const PUB_INLINE_PATTERN = new RegExp(
+	[
+		/\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/.source,
+		/\*\*([^*]+?)\*\*/.source,
+		/\*([^*]+?)\*/.source,
+	].join("|"),
+	"g",
+);
+
+const WIKILINK_CLASS = "internal-link";
+
+/**
+ * Renders inline Obsidian markdown into a container element using DOM
+ * methods. Used by the publish widget to display formatted highlight text.
+ */
+function renderPublishInlineMarkdown(container: HTMLElement, markdown: string): void {
+	let lastIndex = 0;
+	PUB_INLINE_PATTERN.lastIndex = 0;
+	let match: RegExpExecArray | null;
+
+	while ((match = PUB_INLINE_PATTERN.exec(markdown)) !== null) {
+		if (match.index > lastIndex) {
+			container.appendChild(document.createTextNode(markdown.slice(lastIndex, match.index)));
+		}
+
+		if (match[PUB_GROUP_WIKI_TARGET] !== undefined) {
+			const target = match[PUB_GROUP_WIKI_TARGET];
+			const display = match[PUB_GROUP_WIKI_DISPLAY] ?? target;
+			const link = document.createElement("a");
+			link.className = WIKILINK_CLASS;
+			link.setAttribute("data-href", target);
+			link.textContent = display;
+			container.appendChild(link);
+		} else if (match[PUB_GROUP_BOLD] !== undefined) {
+			const strong = document.createElement("strong");
+			strong.textContent = match[PUB_GROUP_BOLD];
+			container.appendChild(strong);
+		} else if (match[PUB_GROUP_ITALIC] !== undefined) {
+			const em = document.createElement("em");
+			em.textContent = match[PUB_GROUP_ITALIC];
+			container.appendChild(em);
+		}
+
+		lastIndex = match.index + match[0].length;
+	}
+
+	if (lastIndex < markdown.length) {
+		container.appendChild(document.createTextNode(markdown.slice(lastIndex)));
+	}
+}
+
 // ─── Item renderers ──────────────────────────────────────────────────
 
 function renderHighlightItem(
@@ -352,11 +416,20 @@ function renderHighlightItem(
 	});
 	itemEl.appendChild(tsEl);
 
-	// Highlighted text with ==marks==.
+	// Highlighted text with ==marks==, supporting inline markdown.
 	const textEl = document.createElement("span");
 	textEl.className = CLS.highlightText;
 	const mark = document.createElement("mark");
-	mark.textContent = highlight.text;
+	// displayText is string[] (per-entry); join with space for display.
+	const hasCustomText = highlight.displayText !== undefined && highlight.displayText.length > 0;
+	const displayText = hasCustomText
+		? highlight.displayText!.join(" ")
+		: highlight.text;
+	if (hasCustomText) {
+		renderPublishInlineMarkdown(mark, displayText);
+	} else {
+		mark.textContent = displayText;
+	}
 	textEl.appendChild(mark);
 	itemEl.appendChild(textEl);
 }

@@ -1,6 +1,8 @@
-import {Platform} from "obsidian";
+import {type App, Platform} from "obsidian";
 import type {Highlight, TranscriptEntry} from "./types";
 import type {VideoDataStore} from "./video-data-store";
+import {showHighlightEditor} from "./highlight-editor";
+import {renderInlineMarkdown} from "./utils/inline-markdown";
 
 /** CSS class applied to highlight <mark> elements. */
 const CSS_HIGHLIGHT = "yt-highlighter-highlight";
@@ -14,6 +16,8 @@ const HIGHLIGHT_TAG = "span";
 
 /** Data attribute storing the highlight ID on highlight elements. */
 const DATA_HIGHLIGHT_ID = "highlightId";
+
+
 
 /** Handle returned by setupHighlighting for external interaction. */
 export interface HighlightHandle {
@@ -34,7 +38,8 @@ export interface HighlightHandle {
  *
  * - Desktop: selecting text wraps it immediately on mouseup (word-level precision).
  * - Mobile: selection is stashed on selectionchange; a toolbar button triggers highlighting.
- * - Clicking/tapping an existing highlight removes it.
+ * - Clicking/tapping an existing highlight opens an inline editor popover
+ *   where the user can edit the display text or delete the highlight.
  * - Highlights are persisted to the VideoDataStore with entry indices and
  *   character offsets so they can be restored on reload.
  *
@@ -50,10 +55,11 @@ export function setupHighlighting(
 	entries: TranscriptEntry[],
 	videoId: string,
 	store: VideoDataStore,
+	app: App,
 	onChange?: () => void,
 ): HighlightHandle {
 	// Apply existing highlights from the data store on load.
-	restoreHighlights(entrySpanMap, entries, videoId, store);
+	restoreHighlights(entrySpanMap, entries, videoId, store, containerEl);
 
 	/**
 	 * Stashed selection range for mobile. Updated on every selectionchange
@@ -74,16 +80,56 @@ export function setupHighlighting(
 		}
 	}
 
+	/**
+	 * Guards against opening multiple editor popovers simultaneously.
+	 * Set to true while an editor is open; reset when it closes.
+	 */
+	let editorOpen = false;
+
+	/**
+	 * Opens the highlight editor popover for a clicked highlight.
+	 * Handles the result: deletion removes the highlight from DOM and store.
+	 */
+	async function openHighlightEditor(highlightEl: HTMLElement): Promise<void> {
+		if (editorOpen) return;
+
+		const highlightId = highlightEl.dataset[DATA_HIGHLIGHT_ID];
+		if (!highlightId) return;
+
+		const highlight = store.get(videoId).highlights.find(h => h.id === highlightId);
+		if (!highlight) return;
+
+		editorOpen = true;
+
+		const result = await showHighlightEditor(
+			app, highlight, entries, videoId, store,
+		);
+
+		editorOpen = false;
+
+		if (result === "deleted") {
+			removeHighlight(highlightId, containerEl, videoId, store);
+			onChange?.();
+		} else if (result === "saved") {
+			// Replace the visible text in highlight spans with displayText.
+			applyDisplayText(highlightId, highlight, containerEl);
+			// displayText may have been updated — notify for progress bar / publish sync.
+			onChange?.();
+		}
+	}
+
 	// ── Desktop: immediate highlight on mouseup ──────────────────────
 
 	if (!Platform.isMobile) {
 		containerEl.addEventListener("mouseup", (event) => {
 			const selection = window.getSelection();
 
-			// Collapsed selection = click. Check if it's on a highlight to remove it.
+			// Collapsed selection = click. Check if it's on a highlight to edit it.
 			if (!selection || selection.isCollapsed) {
-				const removed = handleHighlightClick(event.target as Node, containerEl, videoId, store);
-				if (removed) onChange?.();
+				const highlightEl = findParentHighlight(event.target as Node);
+				if (highlightEl) {
+					void openHighlightEditor(highlightEl);
+				}
 				return;
 			}
 
@@ -96,7 +142,7 @@ export function setupHighlighting(
 		});
 	}
 
-	// ── Mobile: stash selection + tap-to-remove ──────────────────────
+	// ── Mobile: stash selection + tap-to-edit ────────────────────────
 
 	if (Platform.isMobile) {
 		// Track the current selection so the highlight button can use it.
@@ -119,14 +165,16 @@ export function setupHighlighting(
 
 		document.addEventListener("selectionchange", onSelectionChange);
 
-		// Tap-to-remove on mobile: use click (which fires after touch).
+		// Tap-to-edit on mobile: use click (which fires after touch).
 		containerEl.addEventListener("click", (event) => {
 			const selection = window.getSelection();
 			// Only handle taps, not selections.
 			if (selection && !selection.isCollapsed) return;
 
-			const removed = handleHighlightClick(event.target as Node, containerEl, videoId, store);
-			if (removed) onChange?.();
+			const highlightEl = findParentHighlight(event.target as Node);
+			if (highlightEl) {
+				void openHighlightEditor(highlightEl);
+			}
 		});
 	}
 
@@ -196,27 +244,6 @@ function applyHighlightFromRange(
 	store.requestSave(videoId);
 
 	return true;
-}
-
-/**
- * Handles a click/tap on an existing highlight — removes it.
- * Returns true if a highlight was removed.
- */
-function handleHighlightClick(
-	target: Node,
-	containerEl: HTMLElement,
-	videoId: string,
-	store: VideoDataStore,
-): boolean {
-	const highlightEl = findParentHighlight(target);
-	if (highlightEl) {
-		const highlightId = highlightEl.dataset[DATA_HIGHLIGHT_ID];
-		if (highlightId) {
-			removeHighlight(highlightId, containerEl, videoId, store);
-			return true;
-		}
-	}
-	return false;
 }
 
 // ─── DOM range → entry mapping ───────────────────────────────────────
@@ -473,20 +500,122 @@ function findParentHighlight(node: Node): HTMLElement | null {
 	return null;
 }
 
+// ─── Display text replacement ────────────────────────────────────────
+
+/**
+ * Replaces the visible text inside highlight spans with the user's
+ * `displayText` array (one string per entry in the highlight range).
+ *
+ * Groups the highlight wrapper spans by their parent transcript segment,
+ * mapping each group to the corresponding `displayText` element. The
+ * first span in each group gets the rendered text; additional spans in
+ * the same group are emptied.
+ *
+ * If the highlight has no custom displayText, this is a no-op.
+ */
+function applyDisplayText(
+	highlightId: string,
+	highlight: Highlight,
+	containerEl: HTMLElement,
+): void {
+	if (!highlight.displayText || highlight.displayText.length === 0) return;
+
+	const selector = `.${CSS_HIGHLIGHT}[data-highlight-id="${highlightId}"]`;
+	const allSpans = Array.from(
+		containerEl.querySelectorAll(selector),
+	) as HTMLElement[];
+	if (allSpans.length === 0) return;
+
+	// Group highlight spans by parent transcript segment. Spans in DOM
+	// order that share the same parent segment belong to the same entry.
+	// When the parent changes, we advance to the next displayText entry.
+	const groups = groupSpansBySegment(allSpans);
+
+	for (let i = 0; i < groups.length; i++) {
+		const group = groups[i]!;
+		const text = highlight.displayText[i];
+
+		if (text !== undefined) {
+			// First span in the group gets the rendered markdown text.
+			// Prepend a space for non-first groups to match the leading
+			// space that transcript-view.ts adds to non-first segments.
+			const isFirstGroup = i === 0;
+			const spacedText = isFirstGroup ? text : ` ${text}`;
+			group[0]!.textContent = "";
+			renderInlineMarkdown(group[0]!, spacedText);
+		}
+
+		// Additional spans in the group are emptied.
+		for (let j = 1; j < group.length; j++) {
+			group[j]!.textContent = "";
+		}
+	}
+}
+
+/** CSS class on transcript segment spans (must match transcript-view.ts). */
+const CSS_SEGMENT = "yt-highlighter-transcript-segment";
+
+/**
+ * Groups highlight spans by their nearest ancestor transcript segment.
+ * Consecutive spans sharing the same parent segment are grouped together.
+ * Returns an array of groups in DOM order.
+ */
+function groupSpansBySegment(spans: HTMLElement[]): HTMLElement[][] {
+	const groups: HTMLElement[][] = [];
+	let currentParent: Element | null = null;
+	let currentGroup: HTMLElement[] = [];
+
+	for (const span of spans) {
+		const parent = findAncestorSegment(span);
+		if (parent !== currentParent) {
+			if (currentGroup.length > 0) {
+				groups.push(currentGroup);
+			}
+			currentGroup = [span];
+			currentParent = parent;
+		} else {
+			currentGroup.push(span);
+		}
+	}
+
+	if (currentGroup.length > 0) {
+		groups.push(currentGroup);
+	}
+
+	return groups;
+}
+
+/**
+ * Walks up the DOM from a highlight span to find the nearest ancestor
+ * transcript segment span.
+ */
+function findAncestorSegment(el: HTMLElement): Element | null {
+	let current: Element | null = el.parentElement;
+	while (current) {
+		if (current.classList.contains(CSS_SEGMENT)) {
+			return current;
+		}
+		current = current.parentElement;
+	}
+	return null;
+}
+
 // ─── Restore on load ─────────────────────────────────────────────────
 
 /**
  * Restores highlights from the data store by finding the text within
  * each entry span and wrapping the matching character range in <mark>.
+ * Also inserts edited-highlight markers for highlights with custom displayText.
  */
 function restoreHighlights(
 	entrySpanMap: HTMLElement[][],
 	entries: TranscriptEntry[],
 	videoId: string,
 	store: VideoDataStore,
+	containerEl: HTMLElement,
 ): void {
 	for (const highlight of store.get(videoId).highlights) {
-		restoreHighlight(highlight, entrySpanMap, entries);
+		restoreHighlight(highlight, entrySpanMap, entries, containerEl);
 	}
 }
 
@@ -502,6 +631,7 @@ function restoreHighlight(
 	highlight: Highlight,
 	entrySpanMap: HTMLElement[][],
 	entries: TranscriptEntry[],
+	containerEl: HTMLElement,
 ): void {
 	const startSpans = entrySpanMap[highlight.startEntryIndex];
 	const endSpans = entrySpanMap[highlight.endEntryIndex];
@@ -520,6 +650,8 @@ function restoreHighlight(
 
 		if (!range.collapsed) {
 			wrapRangeInHighlightSpans(range, highlight.id);
+			// If the highlight has custom displayText, replace the span text.
+			applyDisplayText(highlight.id, highlight, containerEl);
 		}
 	} catch {
 		// Range may be invalid if the DOM doesn't match stored offsets.

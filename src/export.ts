@@ -3,6 +3,7 @@ import type YouTubeHighlighterPlugin from "./main";
 import type {VideoData, Highlight, Annotation, VideoUserData, TranscriptEntry} from "./types";
 import {CODE_BLOCK_LANGUAGE, normalizeManualBreaks} from "./types";
 import {secondsToTimestamp} from "./utils/time";
+import {getHighlightDisplayText} from "./utils/highlight-text";
 
 const YOUTUBE_VIDEO_URL_BASE = "https://www.youtube.com/watch?v=";
 
@@ -258,9 +259,10 @@ function timestampLink(timestamp: number, videoUrl: string): string {
 
 function highlightToExportItem(highlight: Highlight, videoUrl: string): ExportItem {
 	const link = timestampLink(highlight.startTime, videoUrl);
+	const text = getHighlightDisplayText(highlight);
 	return {
 		timestamp: highlight.startTime,
-		markdown: `> ${link} ==${highlight.text}==`,
+		markdown: `> ${link} ==${text}==`,
 	};
 }
 

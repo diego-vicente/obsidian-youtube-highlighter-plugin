@@ -12,7 +12,7 @@ import {createProgressBar} from "./progress-bar";
 import {TranscriptSettingsModal} from "./transcript-settings-modal";
 import type {VideoDataStore, SyncLogEntry} from "./video-data-store";
 import {secondsToTimestamp} from "./utils/time";
-import {markPublishDirty} from "./publish-sync";
+import {markPublishDirty, onPublishDirtyChange, isPublishDirty} from "./publish-sync";
 
 /** CSS class names used by the code block processor. */
 /** Build timestamp injected by esbuild at compile time. */
@@ -26,6 +26,7 @@ const CSS = {
 	toggleTranscript: "yt-highlighter-toggle-transcript",
 	transcriptBody: "yt-highlighter-transcript-body",
 	transcriptBodyHidden: "yt-highlighter-transcript-body--hidden",
+	publishDirty: "yt-highlighter-publish-dirty",
 	error: "yt-highlighter-error",
 	fetchingNotice: "yt-highlighter-fetching",
 	manualPaste: "yt-highlighter-manual-paste",
@@ -97,6 +98,15 @@ async function renderWidget(
 	const progressDebugEl = infoRowEl.createDiv({cls: CSS.progressDebug});
 	setupPlaybackProgress(player, videoId, store, progressDebugEl);
 
+	// Publish-dirty indicator: a small dot that shows when the code block's
+	// publish data is out of date (user needs to navigate away to sync).
+	const publishDirtyEl = infoRowEl.createSpan({
+		cls: CSS.publishDirty,
+		attr: {title: "Publish data out of date — navigate away to sync"},
+	});
+	// Hidden by default; shown when dirty.
+	publishDirtyEl.style.display = "none";
+
 	// 1c. Progress bar (slim timeline below the player).
 	// Use a late-bound reference so the progress bar can notify the
 	// "Go to" button (created later in the annotations toolbar).
@@ -139,6 +149,19 @@ async function renderWidget(
 	const filePath = ctx.sourcePath;
 	markPublishDirty(filePath, videoId);
 
+	// Update the publish-dirty indicator when state changes.
+	const updateDirtyIndicator = (): void => {
+		const dirty = isPublishDirty(filePath, videoId);
+		publishDirtyEl.style.display = dirty ? "" : "none";
+	};
+	updateDirtyIndicator();
+
+	onPublishDirtyChange((changedPath, changedVideoId, _dirty) => {
+		if (changedPath === filePath && changedVideoId === videoId) {
+			updateDirtyIndicator();
+		}
+	});
+
 	// 3. Render the synced transcript view.
 	if (entries && entries.length > 0) {
 		const userData = store.get(videoId);
@@ -156,7 +179,7 @@ async function renderWidget(
 		};
 		let highlightHandle = setupHighlighting(
 			transcriptView.containerEl, transcriptView.entrySpanMap, entries, videoId, store,
-			onHighlightChange,
+			plugin.app, onHighlightChange,
 		);
 
 		/** Re-renders transcript and re-applies highlights with current data. */
@@ -170,7 +193,7 @@ async function renderWidget(
 
 			highlightHandle = setupHighlighting(
 				transcriptView.containerEl, newEntrySpanMap, entries, videoId, store,
-				onHighlightChange,
+				plugin.app, onHighlightChange,
 			);
 		};
 
@@ -216,7 +239,7 @@ async function renderWidget(
 			if (newMode === "paragraphs") {
 				highlightHandle = setupHighlighting(
 					transcriptView.containerEl, newEntrySpanMap, entries, videoId, store,
-					onHighlightChange,
+					plugin.app, onHighlightChange,
 				);
 			}
 		};

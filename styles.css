@@ -477,6 +477,18 @@
 	text-align: right;
 }
 
+/* Publish-dirty indicator: small dot when publish data needs sync */
+.yt-highlighter-publish-dirty {
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: hsl(30, 90%, 55%);
+	margin-left: var(--size-4-2);
+	flex-shrink: 0;
+	opacity: 0.7;
+}
+
 .yt-highlighter-toggle-transcript {
 	cursor: pointer;
 	font-size: var(--font-smallest);
@@ -697,6 +709,88 @@
 	color: var(--text-error);
 	font-size: var(--font-small);
 	margin-top: 0;
+}
+
+/* ─── Highlight editor modal ─────────────────────────────────────── */
+
+.yt-highlighter-editor-modal .setting-item-description {
+	color: var(--text-muted);
+	font-size: var(--font-small);
+}
+
+/* Hint text showing supported formatting */
+.yt-highlighter-editor-hint {
+	font-size: var(--font-smallest);
+	color: var(--text-faint);
+	font-family: var(--font-monospace);
+	margin-bottom: var(--size-4-3);
+}
+
+/* Per-entry editing row */
+.yt-highlighter-editor-entry {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+	padding: var(--size-4-2);
+	margin-bottom: var(--size-4-2);
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+}
+
+/* Timestamp badge */
+.yt-highlighter-editor-entry-timestamp {
+	font-family: var(--font-monospace);
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+/* Original transcript text (reference, muted) */
+.yt-highlighter-editor-entry-original {
+	font-size: var(--font-smallest);
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+/* Editable input for per-entry display text */
+.yt-highlighter-editor-entry-input {
+	width: 100%;
+	padding: var(--size-4-1) var(--size-4-2);
+	font-size: var(--font-small);
+	color: var(--text-normal);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+}
+
+.yt-highlighter-editor-entry-input:focus {
+	border-color: var(--interactive-accent);
+	outline: none;
+}
+
+/* Live preview of the rendered inline markdown */
+.yt-highlighter-editor-preview {
+	font-size: var(--font-small);
+	color: var(--text-normal);
+	line-height: 1.5;
+	padding: var(--size-4-2);
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	min-height: 1.5em;
+	margin-bottom: var(--size-4-3);
+}
+
+.yt-highlighter-editor-preview-label {
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	margin-right: var(--size-4-2);
+}
+
+.yt-highlighter-editor-preview-content a.internal-link {
+	color: var(--text-accent);
+	text-decoration: underline;
+	cursor: pointer;
 }
 
 /* ─── Error state ────────────────────────────────────────────────── */

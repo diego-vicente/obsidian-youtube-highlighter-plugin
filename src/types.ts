@@ -154,8 +154,21 @@ export function normalizeManualBreaks(raw: ManualBreak[] | number[] | undefined)
  */
 export interface Highlight {
 	id: string;
-	/** The exact text the user selected (for display and export). */
+	/** The exact text the user selected (immutable after creation). */
 	text: string;
+	/**
+	 * User-edited display text override, one string per transcript entry
+	 * in the range [startEntryIndex, endEntryIndex]. Index 0 corresponds
+	 * to startEntryIndex, index 1 to startEntryIndex + 1, etc.
+	 *
+	 * When present, these replace the original text in the transcript DOM
+	 * (keeping karaoke sync working per-entry), in export (==...==),
+	 * and in Publish rendering.
+	 *
+	 * Each string supports inline Obsidian markdown: **bold**, *italic*,
+	 * [[wikilinks]].
+	 */
+	displayText?: string[];
 	/** Index of the first transcript entry touched by this highlight. */
 	startEntryIndex: number;
 	/** Character offset within the first entry's text where the highlight starts. */

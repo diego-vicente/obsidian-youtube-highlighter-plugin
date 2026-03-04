@@ -30,6 +30,9 @@ const CODE_FENCE_CLOSE = "```";
  */
 const dirtyFiles = new Map<string, Set<string>>();
 
+/** Listeners notified when dirty state changes for a specific file+videoId. */
+const dirtyChangeListeners: Array<(filePath: string, videoId: string, dirty: boolean) => void> = [];
+
 /**
  * Marks a video note as needing its `publish` data refreshed.
  * Called by the code block processor whenever the transcript is loaded
@@ -41,7 +44,31 @@ export function markPublishDirty(filePath: string, videoId: string): void {
 		ids = new Set();
 		dirtyFiles.set(filePath, ids);
 	}
+	const wasClean = !ids.has(videoId);
 	ids.add(videoId);
+	if (wasClean) {
+		for (const listener of dirtyChangeListeners) {
+			listener(filePath, videoId, true);
+		}
+	}
+}
+
+/**
+ * Returns true if the given file+videoId has unsaved publish data.
+ */
+export function isPublishDirty(filePath: string, videoId: string): boolean {
+	const ids = dirtyFiles.get(filePath);
+	return ids !== undefined && ids.has(videoId);
+}
+
+/**
+ * Registers a callback invoked when dirty state changes for any file+videoId.
+ * The callback receives `(filePath, videoId, dirty)`.
+ */
+export function onPublishDirtyChange(
+	listener: (filePath: string, videoId: string, dirty: boolean) => void,
+): void {
+	dirtyChangeListeners.push(listener);
 }
 
 // ─── Lifecycle ───────────────────────────────────────────────────────
@@ -126,6 +153,12 @@ async function enrichFile(filePath: string, plugin: YouTubeHighlighterPlugin): P
 		await plugin.app.vault.process(file as TFile, (content: string) => {
 			return enrichCodeBlocks(content, videoIds, plugin);
 		});
+		// Notify listeners that these videoIds are now clean.
+		for (const vid of videoIds) {
+			for (const listener of dirtyChangeListeners) {
+				listener(filePath, vid, false);
+			}
+		}
 		dirtyFiles.delete(filePath);
 	} catch {
 		// File may have been deleted or locked — leave it dirty for retry.
