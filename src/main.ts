@@ -2,7 +2,7 @@ import {Plugin} from "obsidian";
 import type {PluginSettings} from "./types";
 import {DEFAULT_SETTINGS} from "./types";
 import {YouTubeHighlighterSettingTab} from "./settings";
-import {registerCodeBlockProcessor} from "./code-block-processor";
+import {registerCodeBlockProcessor, registerPipExitListener} from "./code-block-processor";
 import {registerInsertCommand} from "./insert-command";
 import {registerExportCommand} from "./export";
 import {registerPublishSync, flushAllPublishData} from "./publish-sync";
@@ -27,6 +27,7 @@ export default class YouTubeHighlighterPlugin extends Plugin {
 		registerInsertCommand(this);
 		registerExportCommand(this);
 		registerPublishSync(this);
+		registerPipExitListener(this);
 
 		this.addSettingTab(new YouTubeHighlighterSettingTab(this.app, this));
 	}

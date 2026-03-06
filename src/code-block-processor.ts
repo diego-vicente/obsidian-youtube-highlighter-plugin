@@ -1,4 +1,4 @@
-import {MarkdownPostProcessorContext, Notice} from "obsidian";
+import {MarkdownPostProcessorContext, Notice, Platform} from "obsidian";
 import type YouTubeHighlighterPlugin from "./main";
 import type {VideoData, TranscriptEntry, TranscriptDisplaySettings} from "./types";
 import {CODE_BLOCK_LANGUAGE, DEFAULT_TRANSCRIPT_DISPLAY_SETTINGS, normalizeManualBreaks} from "./types";
@@ -106,6 +106,21 @@ async function renderWidget(
 	});
 	// Hidden by default; shown when dirty.
 	publishDirtyEl.style.display = "none";
+
+	// PiP button (desktop only — uses Electron's remote API to reach
+	// the <video> element inside YouTube's cross-origin iframe).
+	if (!Platform.isMobile) {
+		const ICON_PIP = "\u29C9"; // ⧉
+		const pipButton = infoRowEl.createEl("button", {
+			cls: CSS.toggleTranscript, // reuse the same subtle button style
+			text: ICON_PIP,
+			attr: {"aria-label": "Picture in Picture"},
+		});
+
+		pipButton.addEventListener("click", () => {
+			void togglePictureInPicture(player.containerEl, videoId);
+		});
+	}
 
 	// 1c. Progress bar (slim timeline below the player).
 	// Use a late-bound reference so the progress bar can notify the
@@ -681,3 +696,150 @@ function renderError(el: HTMLElement, rawSource: string): void {
 	});
 	container.createEl("pre", {text: rawSource});
 }
+
+// ─── Picture-in-Picture (Electron only) ──────────────────────────────
+
+/**
+ * Builds the JS code to execute inside the YouTube iframe to toggle PiP.
+ *
+ * When entering PiP, we:
+ * 1. Register direct Media Session handlers for pause/play — critical
+ *    because Chromium throttles the iframe's JS when the tab is
+ *    backgrounded, breaking YouTube's own controls.
+ * 2. Add a `leavepictureinpicture` listener that posts a message to the
+ *    parent window so we can focus Obsidian and switch to the right tab.
+ *
+ * The videoId is embedded in the script so the parent can identify
+ * which note to navigate to.
+ */
+function buildPipToggleScript(videoId: string): string {
+	return `
+		(function() {
+			var video = document.querySelector('video');
+			if (!video) return 'no-video';
+			if (document.pictureInPictureElement) {
+				document.exitPictureInPicture();
+				return 'exited';
+			}
+			return video.requestPictureInPicture()
+				.then(function() {
+					if (navigator.mediaSession) {
+						navigator.mediaSession.setActionHandler('pause', function() {
+							video.pause();
+						});
+						navigator.mediaSession.setActionHandler('play', function() {
+							video.play();
+						});
+					}
+					video.addEventListener('leavepictureinpicture', function onLeave() {
+						video.removeEventListener('leavepictureinpicture', onLeave);
+						window.parent.postMessage({
+							type: 'yt-highlighter-pip-exit',
+							videoId: ${JSON.stringify(videoId)}
+						}, '*');
+					});
+					return 'entered';
+				})
+				.catch(function(e) { return 'error: ' + e.message; });
+		})()
+	`;
+}
+
+/** Message type sent from the YouTube iframe when PiP exits. */
+const PIP_EXIT_MESSAGE_TYPE = "yt-highlighter-pip-exit";
+
+/**
+ * Toggles Picture-in-Picture for the YouTube video by reaching into
+ * the cross-origin iframe via Electron's remote API.
+ *
+ * This works because:
+ * 1. `remote.getCurrentWebContents().mainFrame.framesInSubtree` lists
+ *    ALL frames including cross-origin ones.
+ * 2. `frame.executeJavaScript(code, true)` with `userGesture=true`
+ *    satisfies the browser's transient activation requirement for PiP.
+ */
+async function togglePictureInPicture(
+	playerContainerEl: HTMLElement,
+	videoId: string,
+): Promise<void> {
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const electron = (window as any).require?.("electron");
+		if (!electron?.remote) return;
+
+		const wc = electron.remote.getCurrentWebContents();
+		if (!wc?.mainFrame) return;
+
+		// Find the YouTube iframe that belongs to THIS player widget.
+		const iframe = playerContainerEl.querySelector("iframe");
+		if (!iframe?.src) return;
+
+		// Extract the video ID from the iframe src to match against frame URLs.
+		const videoIdMatch = iframe.src.match(/\/embed\/([^?]+)/);
+		if (!videoIdMatch) return;
+		const videoIdInUrl = videoIdMatch[1];
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const frames: any[] = wc.mainFrame.framesInSubtree;
+		const ytFrame = frames.find(
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			(f: any) => f.url && f.url.includes("youtube") && f.url.includes(videoIdInUrl),
+		);
+
+		if (!ytFrame) return;
+
+		const SIMULATE_USER_GESTURE = true;
+		await ytFrame.executeJavaScript(
+			buildPipToggleScript(videoId), SIMULATE_USER_GESTURE,
+		);
+	} catch (e) {
+		console.error("PiP toggle failed:", e);
+	}
+}
+
+/**
+ * Registers a global message listener for PiP exit events.
+ * When the YouTube iframe's <video> leaves PiP (e.g., user clicks
+ * "back to tab"), this focuses the Obsidian window and reveals the
+ * workspace leaf containing the note with the video.
+ *
+ * Called once per plugin instance from registerCodeBlockProcessor.
+ */
+export function registerPipExitListener(plugin: YouTubeHighlighterPlugin): void {
+	window.addEventListener("message", (event: MessageEvent) => {
+		if (!event.data || event.data.type !== PIP_EXIT_MESSAGE_TYPE) return;
+
+		const exitVideoId = event.data.videoId;
+		if (typeof exitVideoId !== "string") return;
+
+		// Focus the Obsidian window.
+		try {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const electron = (window as any).require?.("electron");
+			electron?.remote?.getCurrentWindow()?.focus();
+		} catch {
+			// Ignore — window focus is best-effort.
+		}
+
+		// Find the workspace leaf showing the note with this video and reveal it.
+		plugin.app.workspace.iterateAllLeaves((leaf) => {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const file = (leaf.view as any)?.file;
+			if (!file?.path) return;
+
+			// Check if this leaf's DOM contains a player iframe for this video.
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const containerEl = (leaf.view as any)?.containerEl as HTMLElement | undefined;
+			if (!containerEl) return;
+
+			const iframe = containerEl.querySelector(
+				`iframe[src*="${exitVideoId}"]`,
+			);
+			if (iframe) {
+				plugin.app.workspace.revealLeaf(leaf);
+			}
+		});
+	});
+}
+
+
